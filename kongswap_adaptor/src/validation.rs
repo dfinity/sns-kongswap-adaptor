@@ -365,6 +365,19 @@ impl ValidatedAsset {
         }
     }
 
+    pub fn set_symbol(&mut self, new_symbol: ValidatedSymbol) -> bool {
+        match self {
+            Self::Token { ref mut symbol, .. } => {
+                if symbol == &new_symbol {
+                    false
+                } else {
+                    *symbol = new_symbol;
+                    true
+                }
+            }
+        }
+    }
+
     pub fn ledger_canister_id(&self) -> Principal {
         match self {
             Self::Token {

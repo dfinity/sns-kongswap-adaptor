@@ -4,6 +4,7 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 use std::collections::BTreeMap;
 
 use crate::{
+    emit_transaction::emit_transaction,
     kong_types::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
@@ -74,14 +75,15 @@ impl KongSwapAdaptor {
             token: token.clone(),
         };
 
-        let response = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await;
+        let response = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            request,
+            phase,
+            human_readable,
+        )
+        .await;
 
         match response {
             Ok(_) => Ok(()),
@@ -105,14 +107,15 @@ impl KongSwapAdaptor {
         let human_readable =
             "Calling KongSwapBackend.user_balances to get LP balances.".to_string();
 
-        let replies = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await?;
+        let replies = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            request,
+            phase,
+            human_readable,
+        )
+        .await?;
 
         if replies.is_empty() {
             return Ok(Nat::from(0_u8));
@@ -130,6 +133,8 @@ impl KongSwapAdaptor {
                 }
             },
         );
+
+        ic_cdk::println!("lp_balance >>> {:#?}", balances);
 
         if !errors.is_empty() {
             return Err(TransactionError::Backend(format!(

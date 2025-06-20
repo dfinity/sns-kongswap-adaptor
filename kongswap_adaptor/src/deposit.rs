@@ -1,4 +1,5 @@
 use crate::{
+    emit_transaction::emit_transaction,
     kong_api::reply_params_to_result,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
@@ -68,8 +69,16 @@ impl KongSwapAdaptor {
                 created_at_time: None,
                 fee,
             };
-            self.emit_transaction(canister_id, request, phase, human_readable)
-                .await?;
+
+            emit_transaction(
+                &mut self.audit_trail,
+                &self.agent,
+                canister_id,
+                request,
+                phase,
+                human_readable,
+            )
+            .await?;
         }
 
         let ledger_0 = allowance_0.asset.ledger_canister_id();
@@ -99,26 +108,27 @@ impl KongSwapAdaptor {
 
         let original_amount_1 = amount_1.clone();
 
-        let result = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                AddPoolArgs {
-                    token_0: token_0.clone(),
-                    amount_0: amount_0.clone(),
-                    token_1: token_1.clone(),
-                    amount_1,
+        let result = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            AddPoolArgs {
+                token_0: token_0.clone(),
+                amount_0: amount_0.clone(),
+                token_1: token_1.clone(),
+                amount_1,
 
-                    // Liquidity provider fee in basis points 30=0.3%.
-                    lp_fee_bps: Some(30),
+                // Liquidity provider fee in basis points 30=0.3%.
+                lp_fee_bps: Some(30),
 
-                    // Not needed for the ICRC2 flow.
-                    tx_id_0: None,
-                    tx_id_1: None,
-                },
-                TreasuryManagerOperation::Deposit,
-                "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
-            )
-            .await;
+                // Not needed for the ICRC2 flow.
+                tx_id_0: None,
+                tx_id_1: None,
+            },
+            TreasuryManagerOperation::Deposit,
+            "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
+        )
+        .await;
 
         let pool_already_exists = { format!("Pool {} already exists", self.lp_token()) };
 
@@ -164,7 +174,9 @@ impl KongSwapAdaptor {
                 token_1: token_1.clone(),
             };
 
-            self.emit_transaction(
+            emit_transaction(
+                &mut self.audit_trail,
+                &self.agent,
                 self.kong_backend_canister_id,
                 request,
                 phase,
@@ -191,7 +203,9 @@ impl KongSwapAdaptor {
                 tx_id_1: None,
             };
 
-            self.emit_transaction(
+            emit_transaction(
+                &mut self.audit_trail,
+                &self.agent,
                 self.kong_backend_canister_id,
                 request,
                 phase,

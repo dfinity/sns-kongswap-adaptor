@@ -1,4 +1,5 @@
 use crate::{
+    emit_transaction::emit_transaction,
     kong_api::reply_params_to_result,
     kong_types::{RemoveLiquidityArgs, RemoveLiquidityReply},
     validation::ValidatedBalances,
@@ -22,14 +23,15 @@ impl KongSwapAdaptor {
             remove_lp_token_amount,
         };
 
-        let reply = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await?;
+        let reply = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            request,
+            phase,
+            human_readable,
+        )
+        .await?;
 
         let RemoveLiquidityReply {
             status,

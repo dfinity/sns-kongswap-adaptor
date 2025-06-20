@@ -24,7 +24,7 @@ use lazy_static::lazy_static;
 
 use crate::validation::{ValidatedDepositRequest, ValidatedTreasuryManagerInit};
 
-const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24); // one hour
+const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
 // Canister ID from the mainnet.
 // See https://dashboard.internetcomputer.org/canister/2ipq2-uqaaa-aaaar-qailq-cai
@@ -164,6 +164,15 @@ async fn run_periodic_tasks() {
         kong_adaptor
     });
 
+    let result = kong_adaptor.refresh_ledger_metadata().await;
+
+    if let Err(err) = result {
+        log_err(&format!(
+            "KongSwapAdaptor refresh_balances failed: {:?}",
+            err
+        ));
+    }
+
     let result = kong_adaptor.refresh_balances().await;
 
     if let Err(err) = result {
@@ -178,7 +187,7 @@ async fn run_periodic_tasks() {
     });
 }
 
-fn init_timers() {
+fn init_periodic_tasks() {
     let _new_timer_id = ic_cdk_timers::set_timer_interval(RUN_PERIODIC_TASKS_INTERVAL, || {
         ic_cdk::spawn(run_periodic_tasks())
     });
@@ -241,7 +250,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
         *state = Some(kong_adaptor);
     });
 
-    init_timers();
+    init_periodic_tasks();
 
     let allowance_0 = Allowance::from(allowance_0);
     let allowance_1 = Allowance::from(allowance_1);
@@ -255,7 +264,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
 fn canister_post_upgrade() {
     log("post_upgrade.");
 
-    init_timers();
+    init_periodic_tasks();
 }
 
 fn main() {
