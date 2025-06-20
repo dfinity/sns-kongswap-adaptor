@@ -4,13 +4,12 @@ use crate::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply,
     },
-    validation::{ValidatedAllowance, ValidatedAsset},
+    validation::{ValidatedAllowance, ValidatedBalances},
     KongSwapAdaptor,
 };
 use candid::Nat;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
-use std::collections::BTreeMap;
 
 /// How many ledger transaction that incur fees are required for a deposit operation (per token).
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
@@ -21,16 +20,16 @@ impl KongSwapAdaptor {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<BTreeMap<ValidatedAsset, u64>, TransactionError> {
+    ) -> Result<ValidatedBalances, TransactionError> {
         let phase = TreasuryManagerOperation::Deposit;
 
         // Additional validation.
         {
             let ledger_0 = allowance_0.asset.ledger_canister_id();
-            if ledger_0 != self.token_0.ledger_canister_id() {
+            if ledger_0 != self.balances.asset_0.ledger_canister_id() {
                 return Err(TransactionError::Precondition(format!(
                     "KongSwapAdaptor only supports {} as token_0 (got ledger {}).",
-                    self.token_0.symbol(),
+                    self.balances.asset_0.symbol(),
                     ledger_0
                 )));
             }

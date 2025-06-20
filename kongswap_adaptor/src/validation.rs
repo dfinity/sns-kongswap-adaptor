@@ -1,8 +1,9 @@
-use std::{collections::BTreeMap, str::FromStr};
-
 use crate::ICP_LEDGER_CANISTER_ID;
 use candid::{Nat, Principal};
-use sns_treasury_manager::{Allowance, Asset, DepositRequest, TreasuryManagerInit};
+use itertools::{Either, Itertools};
+use maplit::btreemap;
+use sns_treasury_manager::{Allowance, Asset, Balances, DepositRequest, TreasuryManagerInit};
+use std::str::FromStr;
 
 pub const MAX_SYMBOL_BYTES: usize = 10;
 
@@ -386,19 +387,6 @@ pub(crate) fn decode_nat_to_u64(value: Nat) -> Result<u64, String> {
     }
 }
 
-pub(crate) fn balances_to_api(balances: BTreeMap<ValidatedAsset, u64>) -> BTreeMap<Asset, Nat> {
-    let balances: BTreeMap<Asset, Nat> = balances
-        .into_iter()
-        .map(|(asset, amount)| {
-            let asset = Asset::from(asset);
-            let amount = Nat::from(amount);
-            (asset, amount)
-        })
-        .collect::<BTreeMap<Asset, Nat>>();
-
-    balances
-}
-
 impl From<ValidatedAsset> for Asset {
     fn from(value: ValidatedAsset) -> Self {
         let ValidatedAsset::Token {
@@ -432,5 +420,120 @@ impl From<ValidatedAllowance> for Allowance {
             amount_decimals,
             expected_ledger_fee_decimals,
         }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct ValidatedBalances {
+    pub asset_0: ValidatedAsset,
+    pub asset_1: ValidatedAsset,
+    pub balance_0_decimals: u64,
+    pub balance_1_decimals: u64,
+    pub timestamp_ns: u64,
+}
+
+impl ValidatedBalances {
+    pub fn new(
+        asset_0: ValidatedAsset,
+        asset_1: ValidatedAsset,
+        balance_0_decimals: u64,
+        balance_1_decimals: u64,
+        timestamp_ns: u64,
+    ) -> Self {
+        Self {
+            asset_0,
+            asset_1,
+            balance_0_decimals,
+            balance_1_decimals,
+            timestamp_ns,
+        }
+    }
+
+    pub fn set(&mut self, balance_0_decimals: u64, balance_1_decimals: u64, timestamp_ns: u64) {
+        self.balance_0_decimals = balance_0_decimals;
+        self.balance_1_decimals = balance_1_decimals;
+        self.timestamp_ns = timestamp_ns;
+    }
+}
+
+impl From<ValidatedBalances> for Balances {
+    fn from(value: ValidatedBalances) -> Self {
+        let ValidatedBalances {
+            asset_0,
+            asset_1,
+            balance_0_decimals,
+            balance_1_decimals,
+            timestamp_ns,
+        } = value;
+
+        let token_0 = Asset::from(asset_0);
+        let token_1 = Asset::from(asset_1);
+
+        let balances = btreemap! {
+            token_0 => Nat::from(balance_0_decimals),
+            token_1 => Nat::from(balance_1_decimals),
+        };
+
+        Balances {
+            balances,
+            timestamp_ns,
+        }
+    }
+}
+
+impl TryFrom<Balances> for ValidatedBalances {
+    type Error = String;
+
+    fn try_from(value: Balances) -> Result<Self, Self::Error> {
+        let Balances {
+            balances,
+            timestamp_ns,
+        } = value;
+
+        if balances.len() != 2 {
+            return Err(format!(
+                "Expected exactly two balances, got {}.",
+                balances.len()
+            ));
+        }
+
+        let (balances_decimals, amount_errors): (Vec<_>, Vec<_>) =
+            balances.iter().partition_map(|(_, amount_decimals)| {
+                match decode_nat_to_u64(amount_decimals.clone()) {
+                    Ok(amount_decimals) => Either::Left(amount_decimals),
+                    Err(err) => Either::Right(err),
+                }
+            });
+
+        let (assets, asset_errors): (Vec<_>, Vec<_>) =
+            balances.iter().partition_map(|(asset, _)| {
+                match ValidatedAsset::try_from(asset.clone()) {
+                    Ok(asset) => Either::Left(asset),
+                    Err(err) => Either::Right(err),
+                }
+            });
+
+        if amount_errors.len() > 0 || asset_errors.len() > 0 {
+            let amount_errors = amount_errors.join(", ");
+            let asset_errors = asset_errors.join(", ");
+            return Err(format!(
+                "Failed to validate balances:\n amount errors:\n {}; asset errors: {}.",
+                amount_errors, asset_errors,
+            ));
+        }
+
+        let (asset_0, asset_1) = validate_assets(assets)?;
+
+        // Safe due to the previous validation that ensures exactly two balances and zero errors.
+        let balance_0_decimals = balances_decimals[0];
+        let balance_1_decimals = balances_decimals[1];
+
+        Ok(Self {
+            asset_0,
+            asset_1,
+            balance_0_decimals,
+            balance_1_decimals,
+            timestamp_ns,
+        })
     }
 }
