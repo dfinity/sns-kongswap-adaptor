@@ -1,0 +1,145 @@
+use candid::{Nat, Principal};
+use itertools::{Either, Itertools};
+use maplit::btreemap;
+use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use std::collections::BTreeMap;
+
+use crate::{
+    kong_types::{
+        kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
+        UserBalancesReply,
+    },
+    validation::{decode_nat_to_u64, ValidatedAsset},
+    KongSwapAdaptor,
+};
+
+pub(crate) fn reply_params_to_result(
+    operation_name: &str,
+    status: String,
+    symbol_0: String,
+    address_0: String,
+    amount_0: Nat,
+    symbol_1: String,
+    amount_1: Nat,
+    address_1: String,
+) -> Result<BTreeMap<ValidatedAsset, u64>, TransactionError> {
+    if status != "Success" {
+        return Err(TransactionError::Backend(format!(
+            "Failed to {}: status = {}",
+            operation_name, status
+        )));
+    }
+
+    let asset_0 = ValidatedAsset::try_from((symbol_0.to_string(), address_0.to_string()))
+        .map_err(TransactionError::Postcondition)?;
+
+    let asset_1 = ValidatedAsset::try_from((symbol_1.to_string(), address_1.to_string()))
+        .map_err(TransactionError::Postcondition)?;
+
+    let amount_0 = decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
+
+    let amount_1 = decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
+
+    Ok(btreemap! {
+        asset_0 => amount_0,
+        asset_1 => amount_1,
+    })
+}
+
+impl KongSwapAdaptor {
+    pub fn lp_token(&self) -> String {
+        format!("{}_{}", self.token_0.symbol(), self.token_1.symbol())
+    }
+
+    pub async fn maybe_add_token(
+        &mut self,
+        ledger_canister_id: Principal,
+        phase: TreasuryManagerOperation,
+    ) -> Result<(), TransactionError> {
+        let token = format!("IC.{}", ledger_canister_id);
+
+        let human_readable = format!(
+            "Calling KongSwapBackend.add_token to attempt to add {}.",
+            token
+        );
+
+        let request = AddTokenArgs {
+            token: token.clone(),
+        };
+
+        let response = self
+            .emit_transaction(
+                self.kong_backend_canister_id,
+                request,
+                phase,
+                human_readable,
+            )
+            .await;
+
+        match response {
+            Ok(_) => Ok(()),
+            Err(TransactionError::Backend(err))
+                if err == format!("Token {} already exists", token) =>
+            {
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    pub async fn lp_balance(
+        &mut self,
+        phase: TreasuryManagerOperation,
+    ) -> Result<Nat, TransactionError> {
+        let request = UserBalancesArgs {
+            principal_id: ic_cdk::api::id().to_string(),
+        };
+
+        let human_readable =
+            "Calling KongSwapBackend.user_balances to get LP balances.".to_string();
+
+        let replies = self
+            .emit_transaction(
+                self.kong_backend_canister_id,
+                request,
+                phase,
+                human_readable,
+            )
+            .await?;
+
+        if replies.is_empty() {
+            return Ok(Nat::from(0_u8));
+        }
+
+        let (balances, errors): (BTreeMap<_, _>, Vec<_>) = replies.into_iter().partition_map(
+            |UserBalancesReply::LP(UserBalanceLPReply {
+                 symbol, balance, ..
+             })| {
+                match kong_lp_balance_to_decimals(balance) {
+                    Ok(balance) => Either::Left((symbol, balance)),
+                    Err(err) => {
+                        Either::Right(format!("Failed to convert balance for {}: {}", symbol, err))
+                    }
+                }
+            },
+        );
+
+        if !errors.is_empty() {
+            return Err(TransactionError::Backend(format!(
+                "Failed to convert balances: {:?}",
+                errors.join(", ")
+            )));
+        }
+
+        let lp_token = self.lp_token();
+
+        let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
+            return Err(TransactionError::Backend(format!(
+                "Failed to get LP balance for {}.",
+                lp_token
+            )));
+        };
+
+        Ok(balance)
+    }
+}

@@ -1,0 +1,36 @@
+[package]
+name = "kongswap_adaptor"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "kongswap-adaptor-canister"
+path = "src/canister.rs"
+
+[[test]]
+name = "e2e"
+path = "tests/e2e.rs"
+
+[dependencies]
+candid = { workspace = true }
+ic-cdk = { workspace = true }
+ic-cdk-macros = { workspace = true }
+ic-cdk-timers.workspace = true
+ic-stable-structures = { workspace = true }
+lazy_static = "1.5.0"
+serde = { workspace = true }
+sns-treasury-manager = { path = "../../ic/rs/sns/treasury_manager" }
+maplit = "1.0.2"
+itertools = "0.14.0"
+thiserror = "2.0.12"
+ic-canister-log = "0.2.0"
+icrc-ledger-types.workspace = true
+
+[dev-dependencies]
+pocket-ic = { workspace = true }
+tokio = "1.45.1"
+ic-management-canister-types.workspace = true
+ic-icrc1-ledger = { path = "../../ic/rs/ledger_suite/icrc1/ledger" }
+# icrc-ledger-types = { path = "../../ic/packages/icrc-ledger-types" }
+icp-ledger = { path = "../../ic/rs/ledger_suite/icp" }

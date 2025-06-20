@@ -1,0 +1,52 @@
+type Allowance = record {
+  asset : Asset;
+  amount_decimals : nat;
+  expected_ledger_fee_decimals : nat;
+};
+type Asset = variant {
+  Token : record { ledger_canister_id : principal; symbol : Symbol };
+};
+type AuditTrail = record { transactions : vec Transaction };
+type DepositRequest = record { allowances : vec Allowance };
+type Result = variant { Ok : TransactionWitness; Err : TransactionError };
+type Result_1 = variant {
+  Ok : vec record { Asset; nat };
+  Err : TransactionError;
+};
+type Symbol = record { repr : blob };
+type Transaction = record {
+  result : Result;
+  timestamp_ns : nat64;
+  human_readable : text;
+  canister_id : principal;
+  treasury_operation_phase : TreasuryManagerOperation;
+};
+type TransactionError = variant {
+  Call : record { method : text; canister_id : principal; error : text };
+  Postcondition : text;
+  Precondition : text;
+  Backend : text;
+};
+type TransactionWitness = variant { NonLedger : text; Ledger : vec Transfer };
+type Transfer = record {
+  block_index : nat;
+  amount_decimals : nat;
+  ledger_canister_id : text;
+};
+type TreasuryManagerArg = variant {
+  Upgrade : record {};
+  Init : TreasuryManagerInit;
+};
+type TreasuryManagerInit = record { assets : vec Asset };
+type TreasuryManagerOperation = variant {
+  Withdraw;
+  Deposit;
+  IssueReward;
+  Balances;
+};
+service : (TreasuryManagerArg) -> {
+  audit_trail : (record {}) -> (AuditTrail) query;
+  balances : (record {}) -> (Result_1) query;
+  deposit : (DepositRequest) -> (Result_1);
+  withdraw : (record {}) -> (Result_1);
+}
