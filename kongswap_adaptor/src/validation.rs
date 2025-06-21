@@ -446,9 +446,10 @@ pub(crate) fn decode_nat_to_u64(value: Nat) -> Result<u64, String> {
     let u64_digit_components = value.0.to_u64_digits();
 
     match &u64_digit_components[..] {
+        [] => Ok(0),
         [val] => Ok(*val),
         vals => Err(format!(
-            "Error parsing a Nat value `{:?}` to u64: expected a single u64 value, got {:?}",
+            "Error parsing a Nat value `{:?}` to u64: expected a unique u64 value, got {:?}.",
             &value,
             vals.len(),
         )),
