@@ -1,7 +1,7 @@
 use crate::{
     agent::icrc_requests::Icrc1MetadataRequest,
     emit_transaction::emit_transaction,
-    kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply},
+    kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log,
     validation::{decode_nat_to_u64, ValidatedBalances, ValidatedSymbol},
     KongSwapAdaptor,
@@ -14,27 +14,49 @@ impl KongSwapAdaptor {
         self.balances.clone()
     }
 
-    pub async fn refresh_ledger_metadata(&mut self) -> Result<(), TransactionError> {
-        let phase = TreasuryManagerOperation::Metadata;
-
+    /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
+    pub async fn refresh_ledger_metadata(
+        &mut self,
+        phase: TreasuryManagerOperation,
+    ) -> Result<(), TransactionError> {
+        // TODO: All calls in this loop could be started in parallel, and then `join_all`d.
         for (asset_index, asset) in [&mut self.balances.asset_0, &mut self.balances.asset_1]
             .into_iter()
             .enumerate()
         {
             let ledger_canister_id = asset.ledger_canister_id();
 
+            // Phase I. Tell KongSwap to refresh.
+            {
+                let human_readable = format!(
+                    "Calling KongSwapBackend.update_token for ledger #{} ({}).",
+                    asset_index, ledger_canister_id,
+                );
+
+                let token = format!("IC.{}", ledger_canister_id);
+
+                emit_transaction(
+                    &mut self.audit_trail,
+                    &self.agent,
+                    self.kong_backend_canister_id,
+                    UpdateTokenArgs { token },
+                    phase,
+                    human_readable,
+                )
+                .await?;
+            }
+
+            // Phase II. Refresh the localy stored metadata.
             let human_readable = format!(
                 "Refreshing metadata for ledger #{} ({}).",
                 asset_index, ledger_canister_id,
             );
 
-            let request = Icrc1MetadataRequest {};
-
             let reply = emit_transaction(
                 &mut self.audit_trail,
                 &self.agent,
                 ledger_canister_id,
-                request,
+                Icrc1MetadataRequest {},
                 phase,
                 human_readable,
             )
@@ -73,6 +95,8 @@ impl KongSwapAdaptor {
 
     pub async fn refresh_balances(&mut self) -> Result<ValidatedBalances, TransactionError> {
         let phase = TreasuryManagerOperation::Balances;
+
+        self.refresh_ledger_metadata(phase).await?;
 
         let remove_lp_token_amount = self.lp_balance(phase).await?;
 

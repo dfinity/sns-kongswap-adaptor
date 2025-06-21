@@ -53,7 +53,7 @@ fn log_err(msg: &str) {
 }
 
 fn log(msg: &str) {
-    let msg = format!("[KongSwap Adaptor] {}", msg);
+    let msg = format!("[KongSwapAdaptor] {}", msg);
     ic_cdk::print(&msg);
     log!(LOG, "{}", msg);
 }
@@ -163,15 +163,6 @@ async fn run_periodic_tasks() {
         };
         kong_adaptor
     });
-
-    let result = kong_adaptor.refresh_ledger_metadata().await;
-
-    if let Err(err) = result {
-        log_err(&format!(
-            "KongSwapAdaptor refresh_balances failed: {:?}",
-            err
-        ));
-    }
 
     let result = kong_adaptor.refresh_balances().await;
 

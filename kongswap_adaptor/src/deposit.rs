@@ -24,14 +24,23 @@ impl KongSwapAdaptor {
     ) -> Result<ValidatedBalances, TransactionError> {
         let phase = TreasuryManagerOperation::Deposit;
 
-        // Additional validation.
+        // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
         {
-            let ledger_0 = allowance_0.asset.ledger_canister_id();
-            if ledger_0 != self.balances.asset_0.ledger_canister_id() {
+            let new_ledger_0 = allowance_0.asset.ledger_canister_id();
+            let new_ledger_1 = allowance_1.asset.ledger_canister_id();
+
+            let old_asset_0 = self.balances.asset_0;
+            let old_asset_1 = self.balances.asset_1;
+
+            if new_ledger_0 != old_asset_0.ledger_canister_id()
+                || new_ledger_1 != old_asset_1.ledger_canister_id()
+            {
                 return Err(TransactionError::Precondition(format!(
-                    "KongSwapAdaptor only supports {} as token_0 (got ledger {}).",
-                    self.balances.asset_0.symbol(),
-                    ledger_0
+                    "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
+                    old_asset_0.symbol(),
+                    old_asset_1.symbol(),
+                    new_ledger_0,
+                    new_ledger_1,
                 )));
             }
         }
@@ -101,7 +110,10 @@ impl KongSwapAdaptor {
         self.maybe_add_token(ledger_0, phase).await?;
         self.maybe_add_token(ledger_1, phase).await?;
 
-        // Step 3. Ensure the pool exists.
+        // Step 3. Fetch the latest ledger metadata, including symbols and ledger fees.
+        self.refresh_ledger_metadata(phase).await?;
+
+        // Step 4. Ensure the pool exists.
 
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);

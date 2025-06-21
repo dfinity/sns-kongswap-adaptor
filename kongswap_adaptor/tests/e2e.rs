@@ -104,7 +104,7 @@ async fn install_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Pri
 
     install_canister_with_controllers(
         pocket_ic,
-        "KongSwap Adaptor",
+        "KongSwapAdaptor",
         CanisterInstallationTarget::SubnetId(subnet_id),
         arg,
         wasm,
