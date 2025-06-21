@@ -1,8 +1,11 @@
 use crate::ICP_LEDGER_CANISTER_ID;
 use candid::{Nat, Principal};
+use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
 use maplit::btreemap;
-use sns_treasury_manager::{Allowance, Asset, Balances, DepositRequest, TreasuryManagerInit};
+use sns_treasury_manager::{
+    self, Allowance, Asset, Balances, DepositRequest, TreasuryManagerInit, WithdrawRequest,
+};
 use std::str::FromStr;
 
 pub const MAX_SYMBOL_BYTES: usize = 10;
@@ -10,19 +13,6 @@ pub const MAX_SYMBOL_BYTES: usize = 10;
 pub(crate) struct ValidatedTreasuryManagerInit {
     pub allowance_0: ValidatedAllowance,
     pub allowance_1: ValidatedAllowance,
-}
-
-fn validate_amount_and_fee(
-    amount_decimals: &Nat,
-    expected_ledger_fee_decimals: &Nat,
-) -> Result<(), String> {
-    if amount_decimals.clone() / Nat::from(10_u64) < *expected_ledger_fee_decimals {
-        return Err(format!(
-            "amount_decimals be at least 10 * expected_ledger_fee_decimals.",
-        ));
-    }
-
-    Ok(())
 }
 
 pub(crate) fn validate_assets(
@@ -123,24 +113,23 @@ impl TryFrom<Allowance> for ValidatedAllowance {
         let Allowance {
             asset,
             amount_decimals,
-            expected_ledger_fee_decimals,
+            owner_account,
         } = allowance;
 
         let mut problems = vec![];
 
-        if let Err(err) = validate_amount_and_fee(&amount_decimals, &expected_ledger_fee_decimals) {
-            problems.push(err);
-        }
-
-        if amount_decimals.clone() / Nat::from(10_u64) < expected_ledger_fee_decimals {
-            return Err(format!(
-                "Allowance amount must be at least 10 * expected ledger fee; got amount: {}, expected fee: {}",
-                amount_decimals, expected_ledger_fee_decimals
-            ));
-        }
-
         let asset = match ValidatedAsset::try_from(asset) {
-            Ok(asset) => Some(asset),
+            Ok(asset) => {
+                let ledger_fee_decimals = asset.ledger_fee_decimals();
+                if amount_decimals.clone() / Nat::from(10_u64) < ledger_fee_decimals {
+                    problems.push(format!(
+                        "Allowance amount must be at least 10 * ledger fee; \
+                         got amount: {}, expected fee: {}",
+                        amount_decimals, ledger_fee_decimals
+                    ));
+                }
+                Some(asset)
+            }
             Err(err) => {
                 problems.push(err);
                 None
@@ -155,14 +144,6 @@ impl TryFrom<Allowance> for ValidatedAllowance {
             }
         };
 
-        let expected_ledger_fee_decimals = match decode_nat_to_u64(expected_ledger_fee_decimals) {
-            Ok(expected_ledger_fee_decimals) => Some(expected_ledger_fee_decimals),
-            Err(err) => {
-                problems.push(err);
-                None
-            }
-        };
-
         if !problems.is_empty() {
             let problems = problems.join("  - \n");
             return Err(format!("Invalid allowance:\n - {}", problems));
@@ -170,12 +151,12 @@ impl TryFrom<Allowance> for ValidatedAllowance {
 
         let asset = asset.unwrap();
         let amount_decimals = amount_decimals.unwrap();
-        let expected_ledger_fee_decimals = expected_ledger_fee_decimals.unwrap();
+        let owner_account = account_into_icrc1_account(&owner_account);
 
         Ok(Self {
             asset,
             amount_decimals,
-            expected_ledger_fee_decimals,
+            owner_account,
         })
     }
 }
@@ -187,14 +168,19 @@ impl TryFrom<Asset> for ValidatedAsset {
         let Asset::Token {
             symbol,
             ledger_canister_id,
+            ledger_fee_decimals,
         } = value;
 
         let symbol = ValidatedSymbol::try_from(symbol.as_str())
             .map_err(|err| format!("Failed to validate asset symbol: {}", err))?;
 
+        let ledger_fee_decimals = decode_nat_to_u64(ledger_fee_decimals)
+            .map_err(|err| format!("Failed to validate asset ledger fee_decimals: {}", err))?;
+
         Ok(Self::Token {
             symbol,
             ledger_canister_id,
+            ledger_fee_decimals,
         })
     }
 }
@@ -220,15 +206,18 @@ pub(crate) enum ValidatedAsset {
     Token {
         symbol: ValidatedSymbol,
         ledger_canister_id: Principal,
+        ledger_fee_decimals: u64,
     },
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ValidatedAllowance {
     pub asset: ValidatedAsset,
     pub amount_decimals: u64,
-    pub expected_ledger_fee_decimals: u64,
+    pub owner_account: Account,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ValidatedDepositRequest {
     pub allowance_0: ValidatedAllowance,
     pub allowance_1: ValidatedAllowance,
@@ -250,12 +239,52 @@ impl TryFrom<DepositRequest> for ValidatedDepositRequest {
     }
 }
 
-// (symbol, ledger_canister_id)
-impl TryFrom<(String, String)> for ValidatedAsset {
+pub(crate) struct ValidatedWithdrawRequest {
+    pub withdraw_account_0: Account,
+    pub withdraw_account_1: Account,
+}
+
+pub(crate) fn account_into_icrc1_account(account: &sns_treasury_manager::Account) -> Account {
+    Account {
+        owner: account.owner,
+        subaccount: account.subaccount,
+    }
+}
+
+pub(crate) fn icrc1_account_into_account(account: &Account) -> sns_treasury_manager::Account {
+    sns_treasury_manager::Account {
+        owner: account.owner,
+        subaccount: account.subaccount,
+    }
+}
+
+impl TryFrom<(Principal, Principal, WithdrawRequest)> for ValidatedWithdrawRequest {
     type Error = String;
 
-    fn try_from(value: (String, String)) -> Result<Self, Self::Error> {
-        let (symbol, ledger_canister_id) = value;
+    fn try_from(value: (Principal, Principal, WithdrawRequest)) -> Result<Self, Self::Error> {
+        let (ledger_0, ledger_1, WithdrawRequest { withdraw_accounts }) = value;
+
+        let withdraw_account_0 = withdraw_accounts
+            .get(&ledger_0)
+            .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_0))?;
+
+        let withdraw_account_1 = withdraw_accounts
+            .get(&ledger_1)
+            .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_1))?;
+
+        Ok(Self {
+            withdraw_account_0: account_into_icrc1_account(withdraw_account_0),
+            withdraw_account_1: account_into_icrc1_account(withdraw_account_1),
+        })
+    }
+}
+
+// (symbol, ledger_canister_id, ledger_fee_decimals)
+impl TryFrom<(String, String, u64)> for ValidatedAsset {
+    type Error = String;
+
+    fn try_from(value: (String, String, u64)) -> Result<Self, Self::Error> {
+        let (symbol, ledger_canister_id, ledger_fee_decimals) = value;
 
         let symbol = ValidatedSymbol::try_from(symbol)?;
 
@@ -269,6 +298,7 @@ impl TryFrom<(String, String)> for ValidatedAsset {
         Ok(Self::Token {
             symbol,
             ledger_canister_id,
+            ledger_fee_decimals,
         })
     }
 }
@@ -378,6 +408,31 @@ impl ValidatedAsset {
         }
     }
 
+    pub fn ledger_fee_decimals(&self) -> u64 {
+        match self {
+            Self::Token {
+                ledger_fee_decimals,
+                ..
+            } => *ledger_fee_decimals,
+        }
+    }
+
+    pub fn set_ledger_fee_decimals(&mut self, new_fee_decimals: u64) -> bool {
+        match self {
+            Self::Token {
+                ref mut ledger_fee_decimals,
+                ..
+            } => {
+                if ledger_fee_decimals == &new_fee_decimals {
+                    false
+                } else {
+                    *ledger_fee_decimals = new_fee_decimals;
+                    true
+                }
+            }
+        }
+    }
+
     pub fn ledger_canister_id(&self) -> Principal {
         match self {
             Self::Token {
@@ -400,18 +455,29 @@ pub(crate) fn decode_nat_to_u64(value: Nat) -> Result<u64, String> {
     }
 }
 
+pub(crate) fn saturating_sub(left: Nat, right: Nat) -> Nat {
+    if left < right {
+        Nat::from(0u8)
+    } else {
+        left - right
+    }
+}
+
 impl From<ValidatedAsset> for Asset {
     fn from(value: ValidatedAsset) -> Self {
         let ValidatedAsset::Token {
             symbol,
             ledger_canister_id,
+            ledger_fee_decimals,
         } = value;
 
         let symbol = symbol.to_string();
+        let ledger_fee_decimals = Nat::from(ledger_fee_decimals);
 
         Self::Token {
             symbol,
             ledger_canister_id,
+            ledger_fee_decimals,
         }
     }
 }
@@ -421,17 +487,17 @@ impl From<ValidatedAllowance> for Allowance {
         let ValidatedAllowance {
             asset,
             amount_decimals,
-            expected_ledger_fee_decimals,
+            owner_account,
         } = value;
 
         let asset = Asset::from(asset);
         let amount_decimals = Nat::from(amount_decimals);
-        let expected_ledger_fee_decimals = Nat::from(expected_ledger_fee_decimals);
+        let owner_account = icrc1_account_into_account(&owner_account);
 
         Allowance {
             asset,
             amount_decimals,
-            expected_ledger_fee_decimals,
+            owner_account,
         }
     }
 }

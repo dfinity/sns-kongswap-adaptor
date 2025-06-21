@@ -14,6 +14,7 @@ mod deposit;
 mod emit_transaction;
 mod kong_api;
 mod kong_types;
+mod ledger_api;
 mod state;
 mod validation;
 mod withdraw;
@@ -22,7 +23,9 @@ use state::KongSwapAdaptor;
 
 use lazy_static::lazy_static;
 
-use crate::validation::{ValidatedDepositRequest, ValidatedTreasuryManagerInit};
+use crate::validation::{
+    ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
+};
 
 const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
@@ -39,11 +42,18 @@ thread_local! {
     static STATE: RefCell<Option<KongSwapAdaptor>> = RefCell::new(None);
 }
 
-fn check_access() {
+fn check_access(allow_self_call: bool) {
     let caller = ic_cdk::api::caller();
-    if caller != ic_cdk::id() && !ic_cdk::api::is_controller(&caller) {
-        ic_cdk::trap("Only a controller can call this method.");
+
+    if allow_self_call && caller == ic_cdk::id() {
+        return;
     }
+
+    if ic_cdk::api::is_controller(&caller) {
+        return;
+    }
+
+    ic_cdk::trap("Only a controller can call this method.");
 }
 
 declare_log_buffer!(name = LOG, capacity = 100);
@@ -63,19 +73,39 @@ impl TreasuryManager for KongSwapAdaptor {
         Ok(Balances::from(self.get_cached_balances()))
     }
 
-    async fn withdraw(&mut self, _request: WithdrawRequest) -> TreasuryManagerResult {
-        self.withdraw_impl().await.map(Balances::from)
+    async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
+        let ledger_0 = self.balances.asset_0.ledger_canister_id();
+        let ledger_1 = self.balances.asset_1.ledger_canister_id();
+
+        let ValidatedWithdrawRequest {
+            withdraw_account_0,
+            withdraw_account_1,
+        } = (ledger_0, ledger_1, request)
+            .try_into()
+            .map_err(|err| vec![TransactionError::Precondition(err)])?;
+
+        let returned_amounts = self
+            .withdraw_impl(withdraw_account_0, withdraw_account_1)
+            .await
+            .map(Balances::from)?;
+
+        Ok(returned_amounts)
     }
 
     async fn deposit(&mut self, request: DepositRequest) -> TreasuryManagerResult {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request.try_into().map_err(TransactionError::Precondition)?;
+        } = request
+            .try_into()
+            .map_err(|err| vec![TransactionError::Precondition(err)])?;
 
-        self.deposit_impl(allowance_0, allowance_1)
+        let deposited_amounts = self
+            .deposit_impl(allowance_0, allowance_1)
             .await
-            .map(Balances::from)
+            .map(Balances::from)?;
+
+        Ok(deposited_amounts)
     }
 
     fn audit_trail(&self, _request: AuditTrailRequest) -> AuditTrail {
@@ -85,7 +115,8 @@ impl TreasuryManager for KongSwapAdaptor {
 
 #[update]
 async fn deposit(request: DepositRequest) -> TreasuryManagerResult {
-    check_access();
+    let allow_self_call = true;
+    check_access(allow_self_call);
 
     log("deposit.");
 
@@ -110,7 +141,8 @@ async fn deposit(request: DepositRequest) -> TreasuryManagerResult {
 
 #[update]
 async fn withdraw(request: WithdrawRequest) -> TreasuryManagerResult {
-    check_access();
+    let allow_self_call = false;
+    check_access(allow_self_call);
 
     log("withdraw.");
 

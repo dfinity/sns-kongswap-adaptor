@@ -62,9 +62,10 @@ impl KongSwapAdaptor {
             )
             .await?;
 
-            let new_symbol = reply.into_iter().find_map(|(key, value)| {
+            // II.A. Extract and potentially update the symbol.
+            let new_symbol = reply.iter().find_map(|(key, value)| {
                 if key == "icrc1:symbol" {
-                    Some(value)
+                    Some(value.clone())
                 } else {
                     None
                 }
@@ -86,6 +87,34 @@ impl KongSwapAdaptor {
                 log(&format!(
                     "Changing ledger #{} ({}) symbol from `{}` to `{}`.",
                     asset_index, ledger_canister_id, old_symbol, new_symbol,
+                ));
+            }
+
+            // II.B. Refresh the ledger fee.
+            let new_fee = reply.into_iter().find_map(|(key, value)| {
+                if key == "icrc1:fee" {
+                    Some(value)
+                } else {
+                    None
+                }
+            });
+
+            let Some(MetadataValue::Nat(new_fee)) = new_fee else {
+                return Err(TransactionError::Postcondition(format!(
+                    "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
+                    ledger_canister_id
+                )));
+            };
+
+            let new_fee_decimals =
+                decode_nat_to_u64(new_fee).map_err(TransactionError::Postcondition)?;
+
+            let old_fee_decimals = asset.ledger_fee_decimals();
+
+            if asset.set_ledger_fee_decimals(new_fee_decimals) {
+                log(&format!(
+                    "Changing ledger #{} ({}) fee_decimals from `{}` to `{}`.",
+                    asset_index, ledger_canister_id, old_fee_decimals, new_fee_decimals,
                 ));
             }
         }

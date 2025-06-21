@@ -1,15 +1,13 @@
-use std::{error::Error, fmt::Display, future::Future};
-
 use candid::{CandidType, Principal};
 use serde::de::DeserializeOwned;
 use sns_treasury_manager::TransactionWitness;
+use std::{error::Error, fmt::Display, future::Future};
 
 pub mod ic_cdk_agent;
 pub mod icrc_requests;
 
 pub trait Request: Send {
     fn method(&self) -> &'static str;
-    fn update(&self) -> bool;
     fn payload(&self) -> Result<Vec<u8>, candid::Error>;
 
     type Response: CandidType + DeserializeOwned + Send;
