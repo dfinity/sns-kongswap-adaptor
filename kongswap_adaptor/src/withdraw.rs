@@ -1,11 +1,11 @@
 use crate::{
-    emit_transaction::emit_transaction, kong_types::RemoveLiquidityArgs,
+    agent::AbstractAgent, emit_transaction::emit_transaction, kong_types::RemoveLiquidityArgs,
     validation::ValidatedBalances, KongSwapAdaptor,
 };
 use icrc_ledger_types::icrc1::account::Account;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
-impl KongSwapAdaptor {
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
         let phase = TreasuryManagerOperation::Withdraw;
 

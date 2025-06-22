@@ -1,4 +1,5 @@
 use crate::{
+    agent::AbstractAgent,
     emit_transaction::emit_transaction,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
@@ -15,7 +16,7 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
 const DEPOSIT_LEDGER_FEES_PER_TOKEN: u64 = 2;
 
-impl KongSwapAdaptor {
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn deposit_into_dex(
         &mut self,
         allowance_0: ValidatedAllowance,

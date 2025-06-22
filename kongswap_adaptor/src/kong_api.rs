@@ -4,6 +4,7 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 use std::collections::BTreeMap;
 
 use crate::{
+    agent::AbstractAgent,
     emit_transaction::emit_transaction,
     kong_types::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
@@ -13,7 +14,7 @@ use crate::{
     KongSwapAdaptor,
 };
 
-impl KongSwapAdaptor {
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn lp_token(&self) -> String {
         format!(
             "{}_{}",

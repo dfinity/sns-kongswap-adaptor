@@ -1,5 +1,5 @@
 use crate::{
-    agent::icrc_requests::Icrc1MetadataRequest,
+    agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent},
     emit_transaction::emit_transaction,
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log,
@@ -9,7 +9,7 @@ use crate::{
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
-impl KongSwapAdaptor {
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn get_cached_balances(&self) -> ValidatedBalances {
         self.balances.clone()
     }
@@ -122,7 +122,7 @@ impl KongSwapAdaptor {
         Ok(())
     }
 
-    pub async fn refresh_balances(&mut self) -> Result<ValidatedBalances, TransactionError> {
+    pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
         let phase = TreasuryManagerOperation::Balances;
 
         self.refresh_ledger_metadata(phase).await?;
