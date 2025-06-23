@@ -43,7 +43,7 @@ type AuditTrail = record {
 };
 
 type Transaction = record {
-  result : Result;
+  result : TransactionResult;
   timestamp_ns : nat64;
   human_readable : text;
   canister_id : principal;
@@ -57,7 +57,7 @@ type TreasuryManagerOperation = variant {
   Balances;
 };
 
-type Result = variant {
+type TransactionResult = variant {
   Ok : TransactionWitness;
   Err : TransactionError;
 };
