@@ -17,7 +17,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
     pub async fn refresh_ledger_metadata(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<(), TransactionError> {
         // TODO: All calls in this loop could be started in parallel, and then `join_all`d.
         for (asset_index, asset) in [&mut self.balances.asset_0, &mut self.balances.asset_1]
@@ -40,7 +40,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     &self.agent,
                     self.kong_backend_canister_id,
                     UpdateTokenArgs { token },
-                    phase,
+                    operation,
                     human_readable,
                 )
                 .await?;
@@ -57,7 +57,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 ledger_canister_id,
                 Icrc1MetadataRequest {},
-                phase,
+                operation,
                 human_readable,
             )
             .await?;
@@ -123,11 +123,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
-        let phase = TreasuryManagerOperation::Balances;
+        let operation = TreasuryManagerOperation::Balances;
 
-        self.refresh_ledger_metadata(phase).await?;
+        self.refresh_ledger_metadata(operation).await?;
 
-        let remove_lp_token_amount = self.lp_balance(phase).await?;
+        let remove_lp_token_amount = self.lp_balance(operation).await?;
 
         let human_readable = format!(
             "Calling KongSwapBackend.remove_liquidity_amounts to estimate how much liquidity can be removed for LP token amount {}.",
@@ -145,7 +145,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             self.kong_backend_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await?;

@@ -246,17 +246,17 @@ async fn init_async(allowance_0: Allowance, allowance_1: Allowance) {
 
     let result = match result {
         Ok(result) => result,
-        Err(err) => {
+        Err((err_code, err_message)) => {
             log_err(&format!(
-                "Call failed during async initializition: {:?}",
-                err
+                "Self-call failed in async initializition. Error code {}: {:?}",
+                err_code as i32, err_message,
             ));
             return;
         }
     };
 
     if let Err(err) = result.0 {
-        log_err(&format!("Async initialization failed: {:?}", err));
+        log_err(&format!("Initial deposit failed: {:?}", err));
         return;
     }
 

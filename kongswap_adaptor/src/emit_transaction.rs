@@ -8,7 +8,7 @@ pub async fn emit_transaction<R>(
     agent: &impl AbstractAgent,
     canister_id: Principal,
     request: R,
-    phase: TreasuryManagerOperation,
+    operation: TreasuryManagerOperation,
     human_readable: String,
 ) -> Result<R::Ok, TransactionError>
 where
@@ -42,7 +42,7 @@ where
         result: transaction_result,
         human_readable,
         timestamp_ns: ic_cdk::api::time(),
-        treasury_operation_phase: phase,
+        treasury_operation_phase: operation,
     };
 
     audit_trail.record_event(transaction);
