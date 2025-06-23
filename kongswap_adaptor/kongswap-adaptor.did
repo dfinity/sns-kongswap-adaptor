@@ -7,12 +7,13 @@ type Asset = variant {
   Token : record { ledger_canister_id : principal; symbol : text };
 };
 type AuditTrail = record { transactions : vec Transaction };
+type Balances = record {
+  timestamp_ns : nat64;
+  balances : vec record { Asset; nat };
+};
 type DepositRequest = record { allowances : vec Allowance };
 type Result = variant { Ok : TransactionWitness; Err : TransactionError };
-type Result_1 = variant {
-  Ok : vec record { Asset; nat };
-  Err : TransactionError;
-};
+type Result_1 = variant { Ok : Balances; Err : TransactionError };
 type Transaction = record {
   result : Result;
   timestamp_ns : nat64;
@@ -38,6 +39,7 @@ type TreasuryManagerArg = variant {
 };
 type TreasuryManagerOperation = variant {
   Withdraw;
+  Metadata;
   Deposit;
   IssueReward;
   Balances;

@@ -1,15 +1,15 @@
 use candid::{Nat, Principal};
 use itertools::{Either, Itertools};
-use maplit::btreemap;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 use std::collections::BTreeMap;
 
 use crate::{
+    emit_transaction::emit_transaction,
     kong_types::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
-    validation::{decode_nat_to_u64, ValidatedAsset},
+    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
     KongSwapAdaptor,
 };
 
@@ -22,7 +22,7 @@ pub(crate) fn reply_params_to_result(
     symbol_1: String,
     amount_1: Nat,
     address_1: String,
-) -> Result<BTreeMap<ValidatedAsset, u64>, TransactionError> {
+) -> Result<ValidatedBalances, TransactionError> {
     if status != "Success" {
         return Err(TransactionError::Backend(format!(
             "Failed to {}: status = {}",
@@ -36,19 +36,27 @@ pub(crate) fn reply_params_to_result(
     let asset_1 = ValidatedAsset::try_from((symbol_1.to_string(), address_1.to_string()))
         .map_err(TransactionError::Postcondition)?;
 
-    let amount_0 = decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
+    let balance_0_decimals =
+        decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
+    let balance_1_decimals =
+        decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
 
-    let amount_1 = decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
-
-    Ok(btreemap! {
-        asset_0 => amount_0,
-        asset_1 => amount_1,
-    })
+    Ok(ValidatedBalances::new(
+        asset_0,
+        asset_1,
+        balance_0_decimals,
+        balance_1_decimals,
+        ic_cdk::api::time(),
+    ))
 }
 
 impl KongSwapAdaptor {
     pub fn lp_token(&self) -> String {
-        format!("{}_{}", self.token_0.symbol(), self.token_1.symbol())
+        format!(
+            "{}_{}",
+            self.balances.asset_0.symbol(),
+            self.balances.asset_1.symbol()
+        )
     }
 
     pub async fn maybe_add_token(
@@ -67,14 +75,15 @@ impl KongSwapAdaptor {
             token: token.clone(),
         };
 
-        let response = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await;
+        let response = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            request,
+            phase,
+            human_readable,
+        )
+        .await;
 
         match response {
             Ok(_) => Ok(()),
@@ -98,14 +107,15 @@ impl KongSwapAdaptor {
         let human_readable =
             "Calling KongSwapBackend.user_balances to get LP balances.".to_string();
 
-        let replies = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await?;
+        let replies = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            request,
+            phase,
+            human_readable,
+        )
+        .await?;
 
         if replies.is_empty() {
             return Ok(Nat::from(0_u8));
@@ -123,6 +133,8 @@ impl KongSwapAdaptor {
                 }
             },
         );
+
+        ic_cdk::println!("lp_balance >>> {:#?}", balances);
 
         if !errors.is_empty() {
             return Err(TransactionError::Backend(format!(

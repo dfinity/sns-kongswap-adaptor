@@ -4,8 +4,8 @@ use candid::Principal;
 use ic_canister_log::{declare_log_buffer, log};
 use ic_cdk::{init, post_upgrade, query, update};
 use sns_treasury_manager::{
-    Allowance, AuditTrail, AuditTrailRequest, BalancesRequest, DepositRequest, TransactionError,
-    TreasuryManager, TreasuryManagerArg, TreasuryManagerResult, WithdrawRequest,
+    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest,
+    TransactionError, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult, WithdrawRequest,
 };
 
 mod agent;
@@ -22,9 +22,9 @@ use state::KongSwapAdaptor;
 
 use lazy_static::lazy_static;
 
-use crate::validation::{balances_to_api, ValidatedDepositRequest, ValidatedTreasuryManagerInit};
+use crate::validation::{ValidatedDepositRequest, ValidatedTreasuryManagerInit};
 
-const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60 * 24); // one hour
+const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
 // Canister ID from the mainnet.
 // See https://dashboard.internetcomputer.org/canister/2ipq2-uqaaa-aaaar-qailq-cai
@@ -60,11 +60,11 @@ fn log(msg: &str) {
 
 impl TreasuryManager for KongSwapAdaptor {
     fn balances(&self, _request: BalancesRequest) -> TreasuryManagerResult {
-        Ok(balances_to_api(self.get_cached_balances()))
+        Ok(Balances::from(self.get_cached_balances()))
     }
 
     async fn withdraw(&mut self, _request: WithdrawRequest) -> TreasuryManagerResult {
-        self.withdraw_impl().await.map(balances_to_api)
+        self.withdraw_impl().await.map(Balances::from)
     }
 
     async fn deposit(&mut self, request: DepositRequest) -> TreasuryManagerResult {
@@ -75,7 +75,7 @@ impl TreasuryManager for KongSwapAdaptor {
 
         self.deposit_impl(allowance_0, allowance_1)
             .await
-            .map(balances_to_api)
+            .map(Balances::from)
     }
 
     fn audit_trail(&self, _request: AuditTrailRequest) -> AuditTrail {
@@ -164,6 +164,15 @@ async fn run_periodic_tasks() {
         kong_adaptor
     });
 
+    let result = kong_adaptor.refresh_ledger_metadata().await;
+
+    if let Err(err) = result {
+        log_err(&format!(
+            "KongSwapAdaptor refresh_balances failed: {:?}",
+            err
+        ));
+    }
+
     let result = kong_adaptor.refresh_balances().await;
 
     if let Err(err) = result {
@@ -171,8 +180,6 @@ async fn run_periodic_tasks() {
             "KongSwapAdaptor refresh_balances failed: {:?}",
             err
         ));
-    } else {
-        log("KongSwapAdaptor refresh_balances succeeded.");
     }
 
     STATE.with_borrow_mut(|state| {
@@ -180,7 +187,7 @@ async fn run_periodic_tasks() {
     });
 }
 
-fn init_timers() {
+fn init_periodic_tasks() {
     let _new_timer_id = ic_cdk_timers::set_timer_interval(RUN_PERIODIC_TASKS_INTERVAL, || {
         ic_cdk::spawn(run_periodic_tasks())
     });
@@ -207,14 +214,15 @@ async fn init_async(allowance_0: Allowance, allowance_1: Allowance) {
         }
     };
 
-    match result.0 {
-        Ok(_) => {
-            log("Async initialization succeeded.");
-        }
-        Err(err) => {
-            log_err(&format!("Async initialization failed: {:?}", err));
-        }
+    if let Err(err) = result.0 {
+        log_err(&format!("Async initialization failed: {:?}", err));
+        return;
     }
+
+    // Ensure the balances are available after initialization.
+    run_periodic_tasks().await;
+
+    log("init_async completed successfully.");
 }
 
 #[init]
@@ -242,7 +250,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
         *state = Some(kong_adaptor);
     });
 
-    init_timers();
+    init_periodic_tasks();
 
     let allowance_0 = Allowance::from(allowance_0);
     let allowance_1 = Allowance::from(allowance_1);
@@ -256,7 +264,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
 fn canister_post_upgrade() {
     log("post_upgrade.");
 
-    init_timers();
+    init_periodic_tasks();
 }
 
 fn main() {

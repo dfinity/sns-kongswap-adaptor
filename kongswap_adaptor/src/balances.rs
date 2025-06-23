@@ -1,24 +1,77 @@
-use maplit::btreemap;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
-use std::collections::BTreeMap;
-
 use crate::{
+    agent::icrc_requests::Icrc1MetadataRequest,
+    emit_transaction::emit_transaction,
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply},
-    validation::{decode_nat_to_u64, ValidatedAsset},
+    log,
+    validation::{decode_nat_to_u64, ValidatedBalances, ValidatedSymbol},
     KongSwapAdaptor,
 };
+use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
+use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl KongSwapAdaptor {
-    pub fn get_cached_balances(&self) -> BTreeMap<ValidatedAsset, u64> {
-        btreemap! {
-            self.token_0 => self.balance_0_decimals.clone(),
-            self.token_1 => self.balance_1_decimals.clone(),
-        }
+    pub fn get_cached_balances(&self) -> ValidatedBalances {
+        self.balances.clone()
     }
 
-    pub async fn refresh_balances(
-        &mut self,
-    ) -> Result<BTreeMap<ValidatedAsset, u64>, TransactionError> {
+    pub async fn refresh_ledger_metadata(&mut self) -> Result<(), TransactionError> {
+        let phase = TreasuryManagerOperation::Metadata;
+
+        for (asset_index, asset) in [&mut self.balances.asset_0, &mut self.balances.asset_1]
+            .into_iter()
+            .enumerate()
+        {
+            let ledger_canister_id = asset.ledger_canister_id();
+
+            let human_readable = format!(
+                "Refreshing metadata for ledger #{} ({}).",
+                asset_index, ledger_canister_id,
+            );
+
+            let request = Icrc1MetadataRequest {};
+
+            let reply = emit_transaction(
+                &mut self.audit_trail,
+                &self.agent,
+                ledger_canister_id,
+                request,
+                phase,
+                human_readable,
+            )
+            .await?;
+
+            let new_symbol = reply.into_iter().find_map(|(key, value)| {
+                if key == "icrc1:symbol" {
+                    Some(value)
+                } else {
+                    None
+                }
+            });
+
+            let Some(MetadataValue::Text(new_symbol)) = new_symbol else {
+                return Err(TransactionError::Postcondition(format!(
+                    "Ledger {} icrc1_metadata response does not have an `icrc1:symbol`.",
+                    ledger_canister_id
+                )));
+            };
+
+            let new_symbol =
+                ValidatedSymbol::try_from(new_symbol).map_err(TransactionError::Postcondition)?;
+
+            let old_symbol = asset.symbol();
+
+            if asset.set_symbol(new_symbol) {
+                log(&format!(
+                    "Changing ledger #{} ({}) symbol from `{}` to `{}`.",
+                    asset_index, ledger_canister_id, old_symbol, new_symbol,
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn refresh_balances(&mut self) -> Result<ValidatedBalances, TransactionError> {
         let phase = TreasuryManagerOperation::Balances;
 
         let remove_lp_token_amount = self.lp_balance(phase).await?;
@@ -29,29 +82,32 @@ impl KongSwapAdaptor {
         );
 
         let request = RemoveLiquidityAmountsArgs {
-            token_0: self.token_0.symbol(),
-            token_1: self.token_1.symbol(),
+            token_0: self.balances.asset_0.symbol(),
+            token_1: self.balances.asset_1.symbol(),
             remove_lp_token_amount,
         };
 
-        let reply = self
-            .emit_transaction(
-                self.kong_backend_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await?;
+        let reply = emit_transaction(
+            &mut self.audit_trail,
+            &self.agent,
+            self.kong_backend_canister_id,
+            request,
+            phase,
+            human_readable,
+        )
+        .await?;
 
         let RemoveLiquidityAmountsReply {
             amount_0, amount_1, ..
         } = reply;
 
-        let amount_0 = decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
-        let amount_1 = decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
+        let balance_0_decimals =
+            decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
+        let balance_1_decimals =
+            decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
 
-        self.balance_0_decimals = amount_0.clone();
-        self.balance_1_decimals = amount_1.clone();
+        self.balances
+            .set(balance_0_decimals, balance_1_decimals, ic_cdk::api::time());
 
         Ok(self.get_cached_balances())
     }
