@@ -27,7 +27,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub async fn maybe_add_token(
         &mut self,
         ledger_canister_id: Principal,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<(), TransactionError> {
         let token = format!("IC.{}", ledger_canister_id);
 
@@ -45,7 +45,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             self.kong_backend_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await;
@@ -63,7 +63,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn lp_balance(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<Nat, TransactionError> {
         let request = UserBalancesArgs {
             principal_id: ic_cdk::api::id().to_string(),
@@ -77,7 +77,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             self.kong_backend_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await?;

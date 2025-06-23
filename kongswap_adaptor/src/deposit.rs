@@ -22,7 +22,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, TransactionError> {
-        let phase = TreasuryManagerOperation::Deposit;
+        let operation = TreasuryManagerOperation::Deposit;
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
         {
@@ -84,7 +84,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?;
@@ -111,11 +111,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.
         // - The ICP token is assumed to have index 2.
-        self.maybe_add_token(ledger_0, phase).await?;
-        self.maybe_add_token(ledger_1, phase).await?;
+        self.maybe_add_token(ledger_0, operation).await?;
+        self.maybe_add_token(ledger_1, operation).await?;
 
         // Step 3. Fetch the latest ledger metadata, including symbols and ledger fees.
-        self.refresh_ledger_metadata(phase).await?;
+        self.refresh_ledger_metadata(operation).await?;
 
         // Step 4. Ensure the pool exists.
 
@@ -200,7 +200,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 self.kong_backend_canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?
@@ -229,7 +229,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 self.kong_backend_canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?
