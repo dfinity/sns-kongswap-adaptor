@@ -149,7 +149,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let tolerated_errors = [
             format!("LP token {} already exists", self.lp_token()),
-            format!("Pool {} already exists", self.lp_token())
+            format!("Pool {} already exists", self.lp_token()),
         ];
 
         match result {
