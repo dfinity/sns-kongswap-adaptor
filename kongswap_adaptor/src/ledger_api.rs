@@ -138,12 +138,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        Ok(ValidatedBalances {
+        let returned_amounts = ValidatedBalances {
+            timestamp_ns: ic_cdk::api::time(),
             asset_0,
             asset_1,
             balance_0_decimals: return_amount_0_decimals,
             balance_1_decimals: return_amount_1_decimals,
-            timestamp_ns: ic_cdk::api::time(),
-        })
+            owner_account_0: withdraw_account_0,
+            owner_account_1: withdraw_account_1,
+        };
+
+        Ok(returned_amounts)
     }
 }
