@@ -4,6 +4,7 @@ use ic_management_canister_types::CanisterSettings;
 use icp_ledger::{AccountIdentifier, LedgerCanisterInitPayload};
 use lazy_static::lazy_static;
 use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder};
+use sha2::Digest;
 use std::time::Duration;
 
 mod helpers;
@@ -52,9 +53,9 @@ async fn e2e_test() {
     let fiduciary_subnet_id = topology.get_fiduciary().unwrap();
     // let sns_subnet_id = topology.get_sns().unwrap();
 
-    let kong_backend_canister_id = install_kong_swap(&pocket_ic).await;
-    let sns_ledger_canister_ic = install_sns_ledger(&pocket_ic).await;
-    let icp_ledger_canister_id = install_icp_ledger(&pocket_ic).await;
+    let _kong_backend_canister_id = install_kong_swap(&pocket_ic).await;
+    let _sns_ledger_canister_ic = install_sns_ledger(&pocket_ic).await;
+    let _icp_ledger_canister_id = install_icp_ledger(&pocket_ic).await;
 
     let sns_governance_canister_id =
         Principal::from_text("jt5an-tqaaa-aaaaq-aaevq-cai".to_string()).unwrap();
@@ -66,11 +67,13 @@ async fn e2e_test() {
 
     let treasury_sns_account = Account {
         owner: sns_governance_canister_id,
-        subaccount: Some("treasury-sns".as_bytes().to_vec().try_into().unwrap()), // Subaccount for the SNS treasury.
+        subaccount: Some(compute_treasury_subaccount_bytes(
+            sns_governance_canister_id,
+        )), // Subaccount for the SNS treasury.
     };
 
     // Install canister under test.
-    let kong_adaptor_canister_id = install_kong_adaptor(
+    let _kong_adaptor_canister_id = install_kong_adaptor(
         &pocket_ic,
         fiduciary_subnet_id,
         treasury_icp_account,
@@ -80,7 +83,7 @@ async fn e2e_test() {
 
     // TODO: Complete the e2e test.
 
-    for i in 0..100 {
+    for _ in 0..100 {
         pocket_ic.advance_time(Duration::from_secs(60 * 60)).await; // one day
         pocket_ic.tick().await;
     }
@@ -269,4 +272,32 @@ pub async fn install_canister_with_controllers(
     );
 
     canister_id
+}
+
+pub fn compute_treasury_subaccount_bytes(principal: Principal) -> [u8; 32] {
+    /// The static MEMO used when calculating the SNS Treasury subaccount.
+    const TREASURY_SUBACCOUNT_NONCE: u64 = 0;
+    compute_distribution_subaccount_bytes(principal, TREASURY_SUBACCOUNT_NONCE)
+}
+
+/// Computes the subaccount to which locked token distributions are initialized to.
+///
+/// From ic/rs/nervous_system/common/src/ledger.rs
+pub fn compute_distribution_subaccount_bytes(principal: Principal, nonce: u64) -> [u8; 32] {
+    compute_neuron_domain_subaccount_bytes(principal, b"token-distribution", nonce)
+}
+
+/// From ic/rs/nervous_system/common/src/ledger.rs
+fn compute_neuron_domain_subaccount_bytes(
+    controller: Principal,
+    domain: &[u8],
+    nonce: u64,
+) -> [u8; 32] {
+    let domain_length: [u8; 1] = [domain.len() as u8];
+    let mut hasher = sha2::Sha256::default();
+    hasher.update(&domain_length);
+    hasher.update(domain);
+    hasher.update(controller.as_slice());
+    hasher.update(&nonce.to_be_bytes());
+    hasher.finalize().into()
 }

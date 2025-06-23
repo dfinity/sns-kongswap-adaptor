@@ -11,8 +11,8 @@ sudo apt-get install liblmdb-dev clang
 ```
 git clone https://github.com/KongSwap/kong.git
 git clone https://github.com/dfinity/ic.git
-git clone https://github.com/dfinity/sns-treasury-manager.git
-cd sns-treasury-manager
+git clone https://github.com/dfinity/sns-kongswap-adaptor.git
+cd sns-kongswap-adaptor
 ```
 
 ### Build kongswap-adaptor-canister.wasm
@@ -39,7 +39,7 @@ cargo build \
 Assuming the required repositories were cloned into `$HOME`:
 
 ```
-export KONGSWAP_ADAPTOR_CANISTER_WASM_PATH="$HOME/sns-treasury-manager/target/wasm32-unknown-unknown/debug/kongswap-adaptor-canister.wasm"
+export KONGSWAP_ADAPTOR_CANISTER_WASM_PATH="$HOME/sns-kongswap-adaptor/target/wasm32-unknown-unknown/release/kongswap-adaptor-canister.wasm"
 export IC_ICRC1_LEDGER_WASM_PATH="$HOME/ic/ledger_canister.wasm.gz"
 export KONG_BACKEND_CANISTER_WASM_PATH="$HOME/ic/rs/nervous_system/integration_tests/kong_backend.wasm"
 export MAINNET_ICP_LEDGER_CANISTER_WASM_PATH="$HOME/ic/artifacts/canisters/ledger-canister.wasm.gz"

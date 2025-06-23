@@ -30,6 +30,7 @@ type Allowance = record {
   amount_decimals : nat;
   owner_account : Account;
 };
+
 type Asset = variant {
   Token : record {
     ledger_fee_decimals : nat;
@@ -47,7 +48,7 @@ type Transaction = record {
   timestamp_ns : nat64;
   human_readable : text;
   canister_id : principal;
-  treasury_operation_phase : TreasuryManagerOperation;
+  treasury_manager_operation : TreasuryManagerOperation;
 };
 
 type TreasuryManagerOperation = variant {

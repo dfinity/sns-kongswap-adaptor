@@ -928,6 +928,7 @@ dependencies = [
  "phantom_newtype",
  "prost",
  "serde",
+ "serde_bytes",
  "strum",
  "strum_macros",
 ]
@@ -1104,7 +1105,7 @@ dependencies = [
  "ic-ledger-canister-core",
  "ic-ledger-core",
  "ic-ledger-hash-of",
- "icrc-ledger-types 0.1.9",
+ "icrc-ledger-types 0.1.10",
  "num-bigint",
  "num-traits",
  "serde",
@@ -1134,7 +1135,7 @@ dependencies = [
  "ic-ledger-hash-of",
  "ic-metrics-encoder",
  "ic-stable-structures",
- "icrc-ledger-types 0.1.9",
+ "icrc-ledger-types 0.1.10",
  "leb128",
  "minicbor",
  "num-traits",
@@ -1324,7 +1325,7 @@ dependencies = [
  "ic-ledger-core",
  "ic-ledger-hash-of",
  "ic-stable-structures",
- "icrc-ledger-types 0.1.9",
+ "icrc-ledger-types 0.1.10",
  "lazy_static",
  "on_wire",
  "prost",
@@ -1360,6 +1361,8 @@ dependencies = [
 [[package]]
 name = "icrc-ledger-types"
 version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6b8263cab9c48ecf70ee6a33600143612d515e581df410b3767a66e43004fc6"
 dependencies = [
  "base32",
  "candid",
@@ -1367,7 +1370,7 @@ dependencies = [
  "hex",
  "ic-cdk",
  "ic-stable-structures",
- "icrc-cbor 0.1.0",
+ "icrc-cbor 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.12.1",
  "minicbor",
  "num-bigint",
@@ -1382,17 +1385,14 @@ dependencies = [
 
 [[package]]
 name = "icrc-ledger-types"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6b8263cab9c48ecf70ee6a33600143612d515e581df410b3767a66e43004fc6"
+version = "0.1.10"
 dependencies = [
  "base32",
  "candid",
  "crc32fast",
  "hex",
- "ic-cdk",
  "ic-stable-structures",
- "icrc-cbor 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "icrc-cbor 0.1.0",
  "itertools 0.12.1",
  "minicbor",
  "num-bigint",
@@ -1604,12 +1604,13 @@ dependencies = [
  "ic-management-canister-types",
  "ic-stable-structures",
  "icp-ledger",
- "icrc-ledger-types 0.1.9 (registry+https://github.com/rust-lang/crates.io-index)",
+ "icrc-ledger-types 0.1.9",
  "itertools 0.14.0",
  "lazy_static",
  "maplit",
  "pocket-ic",
  "serde",
+ "sha2",
  "sns-treasury-manager",
  "thiserror 2.0.12",
  "tokio",
