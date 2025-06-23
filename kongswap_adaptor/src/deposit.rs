@@ -111,6 +111,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.
         // - The ICP token is assumed to have index 2.
+        // https://github.com/KongSwap/kong/blob/fe-predictions-update/src/kong_lib/src/ic/icp.rs#L1
         self.maybe_add_token(ledger_0, operation).await?;
         self.maybe_add_token(ledger_1, operation).await?;
 
@@ -146,7 +147,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         )
         .await;
 
-        let pool_already_exists = { format!("Pool {} already exists", self.lp_token()) };
+        let tolerated_errors = [
+            format!("LP token {} already exists", self.lp_token()),
+            format!("Pool {} already exists", self.lp_token())
+        ];
 
         match result {
             // All used up, since the pool is brand new.
@@ -172,7 +176,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
-            Err(TransactionError::Backend(err)) if *err == pool_already_exists => (),
+            Err(TransactionError::Backend(err)) if tolerated_errors.contains(&err) => (),
 
             Err(err) => {
                 return Err(err);
