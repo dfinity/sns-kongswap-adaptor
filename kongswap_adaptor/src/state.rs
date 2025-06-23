@@ -3,6 +3,7 @@ use crate::{
     validation::{ValidatedAsset, ValidatedBalances},
 };
 use candid::Principal;
+use icrc_ledger_types::icrc1::account::Account;
 use sns_treasury_manager::AuditTrail;
 
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
@@ -18,15 +19,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         kong_backend_canister_id: Principal,
         asset_0: ValidatedAsset,
         asset_1: ValidatedAsset,
+        owner_account_0: Account,
+        owner_account_1: Account,
     ) -> Self {
         let audit_trail = AuditTrail::new();
 
         let balances = ValidatedBalances {
-            asset_0,
-            asset_1,
+            timestamp_ns: 0,
             balance_0_decimals: 0,
             balance_1_decimals: 0,
-            timestamp_ns: 0,
+            asset_0,
+            asset_1,
+            owner_account_0,
+            owner_account_1,
         };
 
         KongSwapAdaptor {

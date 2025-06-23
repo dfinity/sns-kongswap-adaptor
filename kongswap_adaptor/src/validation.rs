@@ -4,7 +4,8 @@ use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
 use maplit::btreemap;
 use sns_treasury_manager::{
-    self, Allowance, Asset, Balances, DepositRequest, TreasuryManagerInit, WithdrawRequest,
+    self, Accounts, Allowance, Asset, Balance, Balances, DepositRequest, TreasuryManagerInit,
+    WithdrawRequest,
 };
 use std::str::FromStr;
 
@@ -258,23 +259,45 @@ pub(crate) fn icrc1_account_into_account(account: &Account) -> sns_treasury_mana
     }
 }
 
-impl TryFrom<(Principal, Principal, WithdrawRequest)> for ValidatedWithdrawRequest {
+impl TryFrom<(Principal, Principal, Account, Account, WithdrawRequest)>
+    for ValidatedWithdrawRequest
+{
     type Error = String;
 
-    fn try_from(value: (Principal, Principal, WithdrawRequest)) -> Result<Self, Self::Error> {
-        let (ledger_0, ledger_1, WithdrawRequest { withdraw_accounts }) = value;
+    fn try_from(
+        value: (Principal, Principal, Account, Account, WithdrawRequest),
+    ) -> Result<Self, Self::Error> {
+        let (
+            ledger_0,
+            ledger_1,
+            default_withdraw_account_0,
+            default_withdraw_account_1,
+            WithdrawRequest { withdraw_accounts },
+        ) = value;
 
-        let withdraw_account_0 = withdraw_accounts
-            .get(&ledger_0)
-            .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_0))?;
+        let (withdraw_account_0, withdraw_account_1) = if let Some(Accounts {
+            ledger_id_to_account,
+        }) = withdraw_accounts
+        {
+            let withdraw_account_0 = ledger_id_to_account
+                .get(&ledger_0)
+                .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_0))?;
 
-        let withdraw_account_1 = withdraw_accounts
-            .get(&ledger_1)
-            .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_1))?;
+            let withdraw_account_1 = ledger_id_to_account
+                .get(&ledger_1)
+                .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_1))?;
+
+            (
+                account_into_icrc1_account(withdraw_account_0),
+                account_into_icrc1_account(withdraw_account_1),
+            )
+        } else {
+            (default_withdraw_account_0, default_withdraw_account_1)
+        };
 
         Ok(Self {
-            withdraw_account_0: account_into_icrc1_account(withdraw_account_0),
-            withdraw_account_1: account_into_icrc1_account(withdraw_account_1),
+            withdraw_account_0,
+            withdraw_account_1,
         })
     }
 }
@@ -505,26 +528,34 @@ impl From<ValidatedAllowance> for Allowance {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ValidatedBalances {
+    pub timestamp_ns: u64,
+
     pub asset_0: ValidatedAsset,
     pub asset_1: ValidatedAsset,
     pub balance_0_decimals: u64,
     pub balance_1_decimals: u64,
-    pub timestamp_ns: u64,
+
+    pub owner_account_0: Account,
+    pub owner_account_1: Account,
 }
 
 impl ValidatedBalances {
     pub fn new(
+        timestamp_ns: u64,
         asset_0: ValidatedAsset,
         asset_1: ValidatedAsset,
         balance_0_decimals: u64,
         balance_1_decimals: u64,
-        timestamp_ns: u64,
+        owner_account_0: Account,
+        owner_account_1: Account,
     ) -> Self {
         Self {
             asset_0,
             asset_1,
             balance_0_decimals,
             balance_1_decimals,
+            owner_account_0,
+            owner_account_1,
             timestamp_ns,
         }
     }
@@ -543,6 +574,8 @@ impl From<ValidatedBalances> for Balances {
             asset_1,
             balance_0_decimals,
             balance_1_decimals,
+            owner_account_0,
+            owner_account_1,
             timestamp_ns,
         } = value;
 
@@ -550,8 +583,14 @@ impl From<ValidatedBalances> for Balances {
         let token_1 = Asset::from(asset_1);
 
         let balances = btreemap! {
-            token_0 => Nat::from(balance_0_decimals),
-            token_1 => Nat::from(balance_1_decimals),
+            token_0 => Balance {
+                amount_decimals: Nat::from(balance_0_decimals),
+                owner_account: icrc1_account_into_account(&owner_account_0),
+            },
+            token_1 => Balance {
+                amount_decimals: Nat::from(balance_1_decimals),
+                owner_account: icrc1_account_into_account(&owner_account_1),
+            },
         };
 
         Balances {
@@ -577,13 +616,22 @@ impl TryFrom<Balances> for ValidatedBalances {
             ));
         }
 
-        let (balances_decimals, amount_errors): (Vec<_>, Vec<_>) =
-            balances.iter().partition_map(|(_, amount_decimals)| {
-                match decode_nat_to_u64(amount_decimals.clone()) {
-                    Ok(amount_decimals) => Either::Left(amount_decimals),
-                    Err(err) => Either::Right(err),
-                }
-            });
+        let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
+            balances.iter().partition_map(
+                |(
+                    _,
+                    Balance {
+                        amount_decimals,
+                        owner_account,
+                    },
+                )| {
+                    let owner_account = account_into_icrc1_account(owner_account);
+                    match decode_nat_to_u64(amount_decimals.clone()) {
+                        Ok(amount_decimals) => Either::Left((amount_decimals, owner_account)),
+                        Err(err) => Either::Right(err),
+                    }
+                },
+            );
 
         let (assets, asset_errors): (Vec<_>, Vec<_>) =
             balances.iter().partition_map(|(asset, _)| {
@@ -605,15 +653,17 @@ impl TryFrom<Balances> for ValidatedBalances {
         let (asset_0, asset_1) = validate_assets(assets)?;
 
         // Safe due to the previous validation that ensures exactly two balances and zero errors.
-        let balance_0_decimals = balances_decimals[0];
-        let balance_1_decimals = balances_decimals[1];
+        let (balance_0_decimals, owner_account_0) = amount_decimals_owner_account_vec[0];
+        let (balance_1_decimals, owner_account_1) = amount_decimals_owner_account_vec[1];
 
         Ok(Self {
+            timestamp_ns,
             asset_0,
             asset_1,
             balance_0_decimals,
             balance_1_decimals,
-            timestamp_ns,
+            owner_account_0,
+            owner_account_1,
         })
     }
 }

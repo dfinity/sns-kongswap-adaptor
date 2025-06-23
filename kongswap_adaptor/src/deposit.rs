@@ -160,7 +160,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ..
             }) => {
                 return self.reply_params_to_result(
-                    symbol_0, address_0, amount_0, symbol_1, amount_1, address_1,
+                    symbol_0,
+                    address_0,
+                    amount_0,
+                    allowance_0.owner_account,
+                    symbol_1,
+                    amount_1,
+                    address_1,
+                    allowance_1.owner_account,
                 );
             }
 
@@ -245,7 +252,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )));
         }
 
-        self.reply_params_to_result(symbol_0, address_0, amount_0, symbol_1, amount_1, address_1)
+        self.reply_params_to_result(
+            symbol_0,
+            address_0,
+            amount_0,
+            allowance_0.owner_account,
+            symbol_1,
+            amount_1,
+            address_1,
+            allowance_1.owner_account,
+        )
     }
 
     pub async fn deposit_impl(

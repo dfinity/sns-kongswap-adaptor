@@ -9,7 +9,7 @@ use std::time::Duration;
 mod helpers;
 
 use helpers::Wasm;
-use sns_treasury_manager::{Allowance, Asset, TreasuryManagerArg, TreasuryManagerInit};
+use sns_treasury_manager::{Account, Allowance, Asset, TreasuryManagerArg, TreasuryManagerInit};
 
 pub const STARTING_CYCLES_PER_CANISTER: u128 = 2_000_000_000_000_000;
 
@@ -56,8 +56,27 @@ async fn e2e_test() {
     let sns_ledger_canister_ic = install_sns_ledger(&pocket_ic).await;
     let icp_ledger_canister_id = install_icp_ledger(&pocket_ic).await;
 
+    let sns_governance_canister_id =
+        Principal::from_text("jt5an-tqaaa-aaaaq-aaevq-cai".to_string()).unwrap();
+
+    let treasury_icp_account = Account {
+        owner: sns_governance_canister_id,
+        subaccount: None, // No subaccount for the SNS treasury.
+    };
+
+    let treasury_sns_account = Account {
+        owner: sns_governance_canister_id,
+        subaccount: Some("treasury-sns".as_bytes().to_vec().try_into().unwrap()), // Subaccount for the SNS treasury.
+    };
+
     // Install canister under test.
-    let kong_adaptor_canister_id = install_kong_adaptor(&pocket_ic, fiduciary_subnet_id).await;
+    let kong_adaptor_canister_id = install_kong_adaptor(
+        &pocket_ic,
+        fiduciary_subnet_id,
+        treasury_icp_account,
+        treasury_sns_account,
+    )
+    .await;
 
     // TODO: Complete the e2e test.
 
@@ -67,7 +86,12 @@ async fn e2e_test() {
     }
 }
 
-async fn install_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
+async fn install_kong_adaptor(
+    pocket_ic: &PocketIc,
+    subnet_id: Principal,
+    treasury_icp_account: Account,
+    treasury_sns_account: Account,
+) -> Principal {
     let wasm_path = std::env::var("KONGSWAP_ADAPTOR_CANISTER_WASM_PATH")
         .expect("KONGSWAP_ADAPTOR_CANISTER_WASM_PATH must be set.");
 
@@ -76,24 +100,26 @@ async fn install_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Pri
     let sns_asset = Asset::Token {
         symbol: "SNS".to_string(),
         ledger_canister_id: *SNS_LEDGER_CANISTER_ID,
+        ledger_fee_decimals: Nat::from(FEE),
     };
 
     let icp_asset = Asset::Token {
         symbol: "ICP".to_string(),
         ledger_canister_id: *ICP_LEDGER_CANISTER_ID,
+        ledger_fee_decimals: Nat::from(FEE),
     };
 
     let arg = TreasuryManagerArg::Init(TreasuryManagerInit {
         allowances: vec![
             Allowance {
-                amount_decimals: Nat::from(0_u64),
                 asset: sns_asset,
-                expected_ledger_fee_decimals: Nat::from(FEE),
+                amount_decimals: Nat::from(0_u64),
+                owner_account: treasury_icp_account,
             },
             Allowance {
                 amount_decimals: Nat::from(0_u64),
                 asset: icp_asset,
-                expected_ledger_fee_decimals: Nat::from(FEE),
+                owner_account: treasury_sns_account,
             },
         ],
     });
