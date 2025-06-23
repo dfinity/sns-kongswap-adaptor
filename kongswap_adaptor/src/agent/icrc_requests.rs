@@ -1,5 +1,5 @@
 //! This module contains implementations of the `Request` trait for some ICRC-1 and ICRC-2
-//! functions used in the KongSwap Adaptor canister. See https://github.com/dfinity/ICRC-1
+//! functions used in the KongSwapAdaptor canister. See https://github.com/dfinity/ICRC-1
 
 use super::Request;
 use candid::{CandidType, Error, Nat, Principal};

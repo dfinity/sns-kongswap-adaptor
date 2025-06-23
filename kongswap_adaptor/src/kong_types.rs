@@ -237,6 +237,49 @@ pub struct ICReply {
 }
 // ----------------- end:add_token -----------------
 
+// ----------------- begin:update_token -----------------
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateTokenArgs {
+    pub token: String,
+}
+
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+pub enum UpdateTokenReply {
+    IC(ICReply),
+}
+
+impl Request for UpdateTokenArgs {
+    fn method(&self) -> &'static str {
+        "update_token"
+    }
+
+    fn update(&self) -> bool {
+        true
+    }
+
+    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
+        candid::encode_one(self)
+    }
+
+    type Response = Result<UpdateTokenReply, String>;
+
+    type Ok = UpdateTokenReply;
+
+    fn transaction_witness(
+        &self,
+        _canister_id: candid::Principal,
+        response: Self::Response,
+    ) -> Result<(TransactionWitness, Self::Ok), String> {
+        let reply = response?;
+
+        // TODO: Use serde_json::to_string
+        let witness = TransactionWitness::NonLedger(format!("{:?}", self));
+
+        Ok((witness, reply))
+    }
+}
+// ----------------- end:update_token -----------------
+
 // ----------------- begin:add_pool -----------------
 impl Request for AddPoolArgs {
     fn method(&self) -> &'static str {
