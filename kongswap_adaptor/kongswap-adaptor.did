@@ -77,10 +77,13 @@ type DepositRequest = record {
   allowances : vec Allowance;
 };
 
+type TreasuryManagerInit = record {
+  allowances : vec Allowance;
+};
 
 type TreasuryManagerArg = variant {
   Upgrade : record {};
-  Init : DepositRequest;
+  Init : TreasuryManagerInit;
 };
 
 type WithdrawRequest = record {
