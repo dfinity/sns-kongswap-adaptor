@@ -54,10 +54,6 @@ impl Request for AddLiquidityAmountsArgs {
         "add_liquidity_amounts"
     }
 
-    fn update(&self) -> bool {
-        false
-    }
-
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
         let Self {
             token_0,
@@ -93,10 +89,6 @@ impl Request for AddLiquidityArgs {
         "add_liquidity"
     }
 
-    fn update(&self) -> bool {
-        true
-    }
-
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
         candid::encode_one(self)
     }
@@ -111,6 +103,10 @@ impl Request for AddLiquidityArgs {
         response: Self::Response,
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
+
+        if reply.status != "Success" {
+            return Err(format!("Failed to add liquidity, status: {}", reply.status));
+        }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
 
@@ -184,10 +180,6 @@ impl Request for AddTokenArgs {
         "add_token"
     }
 
-    fn update(&self) -> bool {
-        true
-    }
-
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
         candid::encode_one(self)
     }
@@ -253,10 +245,6 @@ impl Request for UpdateTokenArgs {
         "update_token"
     }
 
-    fn update(&self) -> bool {
-        true
-    }
-
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
         candid::encode_one(self)
     }
@@ -286,10 +274,6 @@ impl Request for AddPoolArgs {
         "add_pool"
     }
 
-    fn update(&self) -> bool {
-        true
-    }
-
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
         candid::encode_one(self)
     }
@@ -304,6 +288,10 @@ impl Request for AddPoolArgs {
         response: Self::Response,
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
+
+        if reply.status != "Success" {
+            return Err(format!("Failed to add pool, status: {}", reply.status));
+        }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
 
@@ -377,129 +365,10 @@ pub struct AddPoolArgs {
 }
 // ----------------- end:add_pool -----------------
 
-// ----------------- begin:tokens -----------------
-impl Request for TokensArgs {
-    fn method(&self) -> &'static str {
-        "tokens"
-    }
-
-    fn update(&self) -> bool {
-        false
-    }
-
-    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
-        candid::encode_one(self.symbol.clone())
-    }
-
-    type Response = Result<Vec<TokensReply>, String>;
-
-    type Ok = Vec<TokensReply>;
-
-    fn transaction_witness(
-        &self,
-        _canister_id: candid::Principal,
-        response: Self::Response,
-    ) -> Result<(TransactionWitness, Self::Ok), String> {
-        let reply = response?;
-
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", reply));
-
-        Ok((witness, reply))
-    }
-}
-
-struct TokensArgs {
-    pub symbol: Option<String>,
-}
-
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
-pub enum TokensReply {
-    LP(LPReply),
-    IC(ICReply),
-}
-
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
-pub struct LPReply {
-    pub token_id: u32,
-    pub chain: String,
-    pub address: String,
-    pub name: String,
-    pub symbol: String,
-    pub pool_id_of: u32,
-    pub decimals: u8,
-    pub fee: Nat,
-    pub total_supply: Nat,
-    pub is_removed: bool,
-}
-// ----------------- end:tokens -----------------
-
-// ----------------- begin:tokens -----------------
-impl Request for PoolsArgs {
-    fn method(&self) -> &'static str {
-        "pools"
-    }
-
-    fn update(&self) -> bool {
-        false
-    }
-
-    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
-        candid::encode_one(self.symbol.clone())
-    }
-
-    type Response = Result<Vec<PoolReply>, String>;
-
-    type Ok = Vec<PoolReply>;
-
-    fn transaction_witness(
-        &self,
-        _canister_id: candid::Principal,
-        response: Self::Response,
-    ) -> Result<(TransactionWitness, Self::Ok), String> {
-        let reply = response?;
-
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", reply));
-
-        Ok((witness, reply))
-    }
-}
-
-struct PoolsArgs {
-    pub symbol: Option<String>,
-}
-
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
-pub struct PoolReply {
-    pub pool_id: u32,
-    pub name: String,
-    pub symbol: String,
-    pub chain_0: String,
-    pub symbol_0: String,
-    pub address_0: String,
-    pub balance_0: Nat,
-    pub lp_fee_0: Nat,
-    pub chain_1: String,
-    pub symbol_1: String,
-    pub address_1: String,
-    pub balance_1: Nat,
-    pub lp_fee_1: Nat,
-    pub price: f64,
-    pub lp_fee_bps: u8,
-    pub lp_token_symbol: String,
-    pub is_removed: bool,
-}
-// ----------------- end:tokens -----------------
-
 // ----------------- begin:remove_liquidity_amounts -----------------
 impl Request for RemoveLiquidityAmountsArgs {
     fn method(&self) -> &'static str {
         "remove_liquidity_amounts"
-    }
-
-    fn update(&self) -> bool {
-        false
     }
 
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
@@ -560,10 +429,6 @@ impl Request for RemoveLiquidityArgs {
         "remove_liquidity"
     }
 
-    fn update(&self) -> bool {
-        true
-    }
-
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
         candid::encode_one(self)
     }
@@ -578,6 +443,13 @@ impl Request for RemoveLiquidityArgs {
         response: Self::Response,
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
+
+        if reply.status != "Success" {
+            return Err(format!(
+                "Failed to remove liquidity, status: {}",
+                reply.status
+            ));
+        }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
 
@@ -621,10 +493,6 @@ pub struct RemoveLiquidityArgs {
 impl Request for UserBalancesArgs {
     fn method(&self) -> &'static str {
         "user_balances"
-    }
-
-    fn update(&self) -> bool {
-        false
     }
 
     fn payload(&self) -> Result<Vec<u8>, candid::Error> {
