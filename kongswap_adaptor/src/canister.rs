@@ -219,6 +219,8 @@ async fn run_periodic_tasks() {
         kong_adaptor
     });
 
+    // TODO: Retry withdraw if previous withdraw attempt failed.
+
     kong_adaptor.refresh_balances().await;
 
     kong_adaptor.issue_rewards().await;
