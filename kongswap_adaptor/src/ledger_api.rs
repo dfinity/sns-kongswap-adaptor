@@ -15,7 +15,7 @@ use crate::{
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn get_ledger_balance_decimals(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
         asset: ValidatedAsset,
     ) -> Result<u64, TransactionError> {
         let ledger_canister_id = asset.ledger_canister_id();
@@ -36,7 +36,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             ledger_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await?;
@@ -49,15 +49,15 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     async fn get_ledger_balances(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<(u64, u64), Vec<TransactionError>> {
         // TODO: These calls could be parallelized.
         let balance_0_decimals = self
-            .get_ledger_balance_decimals(phase, self.balances.asset_0)
+            .get_ledger_balance_decimals(operation, self.balances.asset_0)
             .await;
 
         let balance_1_decimals = self
-            .get_ledger_balance_decimals(phase, self.balances.asset_1)
+            .get_ledger_balance_decimals(operation, self.balances.asset_1)
             .await;
 
         match (balance_0_decimals, balance_1_decimals) {
@@ -69,7 +69,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub(crate) async fn return_remaining_assets_to_owner(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
     ) -> Result<ValidatedBalances, Vec<TransactionError>> {
@@ -79,7 +79,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Take into account that the ledger fee required for returning the assets.
 
         let (return_amount_0_decimals, return_amount_1_decimals) = {
-            let (balance_0_decimals, balance_1_decimals) = self.get_ledger_balances(phase).await?;
+            let (balance_0_decimals, balance_1_decimals) =
+                self.get_ledger_balances(operation).await?;
 
             let return_amount_0_decimals =
                 balance_0_decimals.saturating_sub(asset_0.ledger_fee_decimals());
@@ -115,7 +116,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 to: withdraw_account,
                 fee: Some(Nat::from(asset.ledger_fee_decimals())),
                 created_at_time: Some(ic_cdk::api::time()),
-                memo: Some(Memo::from(Vec::<u8>::from(phase))),
+                memo: Some(Memo::from(Vec::<u8>::from(operation))),
                 amount: Nat::from(amount_decimals),
             };
 
@@ -124,7 +125,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 ledger_canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await;
@@ -138,12 +139,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        Ok(ValidatedBalances {
+        let returned_amounts = ValidatedBalances {
+            timestamp_ns: ic_cdk::api::time(),
             asset_0,
             asset_1,
             balance_0_decimals: return_amount_0_decimals,
             balance_1_decimals: return_amount_1_decimals,
-            timestamp_ns: ic_cdk::api::time(),
-        })
+            owner_account_0: withdraw_account_0,
+            owner_account_1: withdraw_account_1,
+        };
+
+        Ok(returned_amounts)
     }
 }

@@ -20,6 +20,7 @@ mod emit_transaction;
 mod kong_api;
 mod kong_types;
 mod ledger_api;
+mod rewards;
 mod state;
 mod validation;
 mod withdraw;
@@ -69,11 +70,19 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
         let ledger_0 = self.balances.asset_0.ledger_canister_id();
         let ledger_1 = self.balances.asset_1.ledger_canister_id();
+        let default_withdraw_account_0 = self.balances.owner_account_0;
+        let default_withdraw_account_1 = self.balances.owner_account_1;
 
         let ValidatedWithdrawRequest {
             withdraw_account_0,
             withdraw_account_1,
-        } = (ledger_0, ledger_1, request)
+        } = (
+            ledger_0,
+            ledger_1,
+            default_withdraw_account_0,
+            default_withdraw_account_1,
+            request,
+        )
             .try_into()
             .map_err(|err| vec![TransactionError::Precondition(err)])?;
 
@@ -117,6 +126,14 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
                 "KongSwapAdaptor refresh_balances failed: {:?}",
                 err
             ));
+        }
+    }
+
+    async fn issue_rewards(&mut self) {
+        let result = self.issue_rewards_impl().await;
+
+        if let Err(err) = result {
+            log_err(&format!("KongSwapAdaptor issue_rewards failed: {:?}", err));
         }
     }
 }
@@ -204,6 +221,8 @@ async fn run_periodic_tasks() {
 
     kong_adaptor.refresh_balances().await;
 
+    kong_adaptor.issue_rewards().await;
+
     STATE.with_borrow_mut(|state| {
         *state = Some(kong_adaptor);
     });
@@ -227,17 +246,17 @@ async fn init_async(allowance_0: Allowance, allowance_1: Allowance) {
 
     let result = match result {
         Ok(result) => result,
-        Err(err) => {
+        Err((err_code, err_message)) => {
             log_err(&format!(
-                "Call failed during async initializition: {:?}",
-                err
+                "Self-call failed in async initializition. Error code {}: {:?}",
+                err_code as i32, err_message,
             ));
             return;
         }
     };
 
     if let Err(err) = result.0 {
-        log_err(&format!("Async initialization failed: {:?}", err));
+        log_err(&format!("Initial deposit failed: {:?}", err));
         return;
     }
 
@@ -267,6 +286,8 @@ async fn canister_init(arg: TreasuryManagerArg) {
         *KONG_BACKEND_CANISTER_ID,
         allowance_0.asset,
         allowance_1.asset,
+        allowance_0.owner_account,
+        allowance_1.owner_account,
     );
 
     STATE.with_borrow_mut(|state| {
@@ -294,7 +315,31 @@ fn canister_post_upgrade(arg: TreasuryManagerArg) {
     init_periodic_tasks();
 }
 
+fn candid_service() -> String {
+    candid::export_service!();
+    __export_service()
+}
+
 fn main() {
     candid::export_service!();
-    println!("{}", __export_service());
+    println!("{}", candid_service());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use candid_parser::utils::{service_equal, CandidSource};
+
+    #[test]
+    fn test_implemented_interface_matches_declared_interface_exactly() {
+        let declared_interface = include_str!("../kongswap-adaptor.did");
+        let declared_interface = CandidSource::Text(declared_interface);
+
+        // candid::export_service!();
+        let implemented_interface_str = candid_service();
+        let implemented_interface = CandidSource::Text(&implemented_interface_str);
+
+        let result = service_equal(declared_interface, implemented_interface);
+        assert!(result.is_ok(), "{:?}\n\n", result.unwrap_err());
+    }
 }

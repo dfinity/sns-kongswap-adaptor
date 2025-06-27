@@ -1,4 +1,5 @@
 use candid::{Nat, Principal};
+use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 use std::collections::BTreeMap;
@@ -26,7 +27,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub async fn maybe_add_token(
         &mut self,
         ledger_canister_id: Principal,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<(), TransactionError> {
         let token = format!("IC.{}", ledger_canister_id);
 
@@ -44,7 +45,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             self.kong_backend_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await;
@@ -62,7 +63,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn lp_balance(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<Nat, TransactionError> {
         let request = UserBalancesArgs {
             principal_id: ic_cdk::api::id().to_string(),
@@ -76,7 +77,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             self.kong_backend_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await?;
@@ -124,9 +125,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         symbol_0: String,
         address_0: String,
         amount_0: Nat,
+        owner_account_0: Account,
         symbol_1: String,
         amount_1: Nat,
         address_1: String,
+        owner_account_1: Account,
     ) -> Result<ValidatedBalances, TransactionError> {
         let fee_0 = self.balances.asset_0.ledger_fee_decimals();
         let fee_1 = self.balances.asset_1.ledger_fee_decimals();
@@ -143,11 +146,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
 
         Ok(ValidatedBalances::new(
+            ic_cdk::api::time(),
             asset_0,
             asset_1,
             balance_0_decimals,
             balance_1_decimals,
-            ic_cdk::api::time(),
+            owner_account_0,
+            owner_account_1,
         ))
     }
 }

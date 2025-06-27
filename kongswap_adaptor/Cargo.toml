@@ -31,6 +31,7 @@ icrc-ledger-types.workspace = true
 pocket-ic = { workspace = true }
 tokio = "1.45.1"
 ic-management-canister-types.workspace = true
+candid_parser = "0.1.2"
 ic-icrc1-ledger = { path = "../../ic/rs/ledger_suite/icrc1/ledger" }
-# icrc-ledger-types = { path = "../../ic/packages/icrc-ledger-types" }
 icp-ledger = { path = "../../ic/rs/ledger_suite/icp" }
+sha2 = "0.10.9"

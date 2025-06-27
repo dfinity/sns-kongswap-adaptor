@@ -22,7 +22,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, TransactionError> {
-        let phase = TreasuryManagerOperation::Deposit;
+        let operation = TreasuryManagerOperation::Deposit;
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
         {
@@ -84,7 +84,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?;
@@ -111,11 +111,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.
         // - The ICP token is assumed to have index 2.
-        self.maybe_add_token(ledger_0, phase).await?;
-        self.maybe_add_token(ledger_1, phase).await?;
+        // https://github.com/KongSwap/kong/blob/fe-predictions-update/src/kong_lib/src/ic/icp.rs#L1
+        self.maybe_add_token(ledger_0, operation).await?;
+        self.maybe_add_token(ledger_1, operation).await?;
 
         // Step 3. Fetch the latest ledger metadata, including symbols and ledger fees.
-        self.refresh_ledger_metadata(phase).await?;
+        self.refresh_ledger_metadata(operation).await?;
 
         // Step 4. Ensure the pool exists.
 
@@ -146,7 +147,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         )
         .await;
 
-        let pool_already_exists = { format!("Pool {} already exists", self.lp_token()) };
+        let tolerated_errors = [
+            format!("LP token {} already exists", self.lp_token()),
+            format!("Pool {} already exists", self.lp_token()),
+        ];
 
         match result {
             // All used up, since the pool is brand new.
@@ -160,12 +164,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ..
             }) => {
                 return self.reply_params_to_result(
-                    symbol_0, address_0, amount_0, symbol_1, amount_1, address_1,
+                    symbol_0,
+                    address_0,
+                    amount_0,
+                    allowance_0.owner_account,
+                    symbol_1,
+                    amount_1,
+                    address_1,
+                    allowance_1.owner_account,
                 );
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
-            Err(TransactionError::Backend(err)) if *err == pool_already_exists => (),
+            Err(TransactionError::Backend(err)) if tolerated_errors.contains(&err) => (),
 
             Err(err) => {
                 return Err(err);
@@ -193,7 +204,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 self.kong_backend_canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?
@@ -222,7 +233,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 &self.agent,
                 self.kong_backend_canister_id,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?
@@ -245,7 +256,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )));
         }
 
-        self.reply_params_to_result(symbol_0, address_0, amount_0, symbol_1, amount_1, address_1)
+        self.reply_params_to_result(
+            symbol_0,
+            address_0,
+            amount_0,
+            allowance_0.owner_account,
+            symbol_1,
+            amount_1,
+            address_1,
+            allowance_1.owner_account,
+        )
     }
 
     pub async fn deposit_impl(

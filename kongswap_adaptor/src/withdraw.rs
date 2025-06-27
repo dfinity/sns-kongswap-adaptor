@@ -7,9 +7,9 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
-        let phase = TreasuryManagerOperation::Withdraw;
+        let operation = TreasuryManagerOperation::Withdraw;
 
-        let remove_lp_token_amount = self.lp_balance(phase).await.map_err(|err| vec![err])?;
+        let remove_lp_token_amount = self.lp_balance(operation).await.map_err(|err| vec![err])?;
 
         let human_readable =
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."
@@ -26,7 +26,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             &self.agent,
             self.kong_backend_canister_id,
             request,
-            phase,
+            operation,
             human_readable,
         )
         .await
