@@ -1,5 +1,5 @@
 use crate::{
-    agent::icrc_requests::Icrc1MetadataRequest,
+    agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent},
     emit_transaction::emit_transaction,
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log,
@@ -9,7 +9,7 @@ use crate::{
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
-impl KongSwapAdaptor {
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn get_cached_balances(&self) -> ValidatedBalances {
         self.balances.clone()
     }
@@ -62,9 +62,10 @@ impl KongSwapAdaptor {
             )
             .await?;
 
-            let new_symbol = reply.into_iter().find_map(|(key, value)| {
+            // II.A. Extract and potentially update the symbol.
+            let new_symbol = reply.iter().find_map(|(key, value)| {
                 if key == "icrc1:symbol" {
-                    Some(value)
+                    Some(value.clone())
                 } else {
                     None
                 }
@@ -88,12 +89,40 @@ impl KongSwapAdaptor {
                     asset_index, ledger_canister_id, old_symbol, new_symbol,
                 ));
             }
+
+            // II.B. Refresh the ledger fee.
+            let new_fee = reply.into_iter().find_map(|(key, value)| {
+                if key == "icrc1:fee" {
+                    Some(value)
+                } else {
+                    None
+                }
+            });
+
+            let Some(MetadataValue::Nat(new_fee)) = new_fee else {
+                return Err(TransactionError::Postcondition(format!(
+                    "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
+                    ledger_canister_id
+                )));
+            };
+
+            let new_fee_decimals =
+                decode_nat_to_u64(new_fee).map_err(TransactionError::Postcondition)?;
+
+            let old_fee_decimals = asset.ledger_fee_decimals();
+
+            if asset.set_ledger_fee_decimals(new_fee_decimals) {
+                log(&format!(
+                    "Changing ledger #{} ({}) fee_decimals from `{}` to `{}`.",
+                    asset_index, ledger_canister_id, old_fee_decimals, new_fee_decimals,
+                ));
+            }
         }
 
         Ok(())
     }
 
-    pub async fn refresh_balances(&mut self) -> Result<ValidatedBalances, TransactionError> {
+    pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
         let phase = TreasuryManagerOperation::Balances;
 
         self.refresh_ledger_metadata(phase).await?;

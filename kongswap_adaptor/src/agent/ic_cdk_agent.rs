@@ -1,4 +1,4 @@
-use super::{CallCanisters, Request};
+use super::{AbstractAgent, Request};
 use candid::Principal;
 use thiserror::Error;
 
@@ -20,7 +20,7 @@ pub enum CdkAgentError {
     CandidDecode(candid::Error),
 }
 
-impl CallCanisters for CdkAgent {
+impl AbstractAgent for CdkAgent {
     type Error = CdkAgentError;
 
     async fn call<R: Request>(

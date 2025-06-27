@@ -1,12 +1,17 @@
-use std::{cell::RefCell, time::Duration};
-
+use crate::{
+    agent::{ic_cdk_agent::CdkAgent, AbstractAgent},
+    validation::{ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest},
+};
 use candid::Principal;
 use ic_canister_log::{declare_log_buffer, log};
 use ic_cdk::{init, post_upgrade, query, update};
+use lazy_static::lazy_static;
 use sns_treasury_manager::{
     Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest,
     TransactionError, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult, WithdrawRequest,
 };
+use state::KongSwapAdaptor;
+use std::{cell::RefCell, time::Duration};
 
 mod agent;
 mod balances;
@@ -14,15 +19,10 @@ mod deposit;
 mod emit_transaction;
 mod kong_api;
 mod kong_types;
+mod ledger_api;
 mod state;
 mod validation;
 mod withdraw;
-
-use state::KongSwapAdaptor;
-
-use lazy_static::lazy_static;
-
-use crate::validation::{ValidatedDepositRequest, ValidatedTreasuryManagerInit};
 
 const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
@@ -36,14 +36,21 @@ lazy_static! {
 }
 
 thread_local! {
-    static STATE: RefCell<Option<KongSwapAdaptor>> = RefCell::new(None);
+    static STATE: RefCell<Option<KongSwapAdaptor<CdkAgent>>> = RefCell::new(None);
 }
 
 fn check_access() {
     let caller = ic_cdk::api::caller();
-    if caller != ic_cdk::id() && !ic_cdk::api::is_controller(&caller) {
-        ic_cdk::trap("Only a controller can call this method.");
+
+    if caller == ic_cdk::id() {
+        return;
     }
+
+    if ic_cdk::api::is_controller(&caller) {
+        return;
+    }
+
+    ic_cdk::trap("Only a controller can call this method.");
 }
 
 declare_log_buffer!(name = LOG, capacity = 100);
@@ -58,28 +65,59 @@ fn log(msg: &str) {
     log!(LOG, "{}", msg);
 }
 
-impl TreasuryManager for KongSwapAdaptor {
-    fn balances(&self, _request: BalancesRequest) -> TreasuryManagerResult {
-        Ok(Balances::from(self.get_cached_balances()))
-    }
+impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
+    async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
+        let ledger_0 = self.balances.asset_0.ledger_canister_id();
+        let ledger_1 = self.balances.asset_1.ledger_canister_id();
 
-    async fn withdraw(&mut self, _request: WithdrawRequest) -> TreasuryManagerResult {
-        self.withdraw_impl().await.map(Balances::from)
+        let ValidatedWithdrawRequest {
+            withdraw_account_0,
+            withdraw_account_1,
+        } = (ledger_0, ledger_1, request)
+            .try_into()
+            .map_err(|err| vec![TransactionError::Precondition(err)])?;
+
+        let returned_amounts = self
+            .withdraw_impl(withdraw_account_0, withdraw_account_1)
+            .await
+            .map(Balances::from)?;
+
+        Ok(returned_amounts)
     }
 
     async fn deposit(&mut self, request: DepositRequest) -> TreasuryManagerResult {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request.try_into().map_err(TransactionError::Precondition)?;
+        } = request
+            .try_into()
+            .map_err(|err| vec![TransactionError::Precondition(err)])?;
 
-        self.deposit_impl(allowance_0, allowance_1)
+        let deposited_amounts = self
+            .deposit_impl(allowance_0, allowance_1)
             .await
-            .map(Balances::from)
+            .map(Balances::from)?;
+
+        Ok(deposited_amounts)
     }
 
     fn audit_trail(&self, _request: AuditTrailRequest) -> AuditTrail {
         self.audit_trail.clone()
+    }
+
+    fn balances(&self, _request: BalancesRequest) -> TreasuryManagerResult {
+        Ok(Balances::from(self.get_cached_balances()))
+    }
+
+    async fn refresh_balances(&mut self) {
+        let result = self.refresh_balances_impl().await;
+
+        if let Err(err) = result {
+            log_err(&format!(
+                "KongSwapAdaptor refresh_balances failed: {:?}",
+                err
+            ));
+        }
     }
 }
 
@@ -164,14 +202,7 @@ async fn run_periodic_tasks() {
         kong_adaptor
     });
 
-    let result = kong_adaptor.refresh_balances().await;
-
-    if let Err(err) = result {
-        log_err(&format!(
-            "KongSwapAdaptor refresh_balances failed: {:?}",
-            err
-        ));
-    }
+    kong_adaptor.refresh_balances().await;
 
     STATE.with_borrow_mut(|state| {
         *state = Some(kong_adaptor);
@@ -232,6 +263,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .expect("Failed to validate TreasuryManagerInit.");
 
     let kong_adaptor = KongSwapAdaptor::new(
+        CdkAgent::new(),
         *KONG_BACKEND_CANISTER_ID,
         allowance_0.asset,
         allowance_1.asset,
@@ -252,8 +284,12 @@ async fn canister_init(arg: TreasuryManagerArg) {
 }
 
 #[post_upgrade]
-fn canister_post_upgrade() {
+fn canister_post_upgrade(arg: TreasuryManagerArg) {
     log("post_upgrade.");
+
+    let TreasuryManagerArg::Upgrade(_upgrade) = arg else {
+        ic_cdk::trap("Expected TreasuryManagerArg::Upgrade on canister upgrade.");
+    };
 
     init_periodic_tasks();
 }

@@ -1,11 +1,11 @@
-use crate::agent::{CallCanisters, Request};
+use crate::agent::{AbstractAgent, Request};
 use candid::Principal;
 use sns_treasury_manager::{AuditTrail, Transaction, TransactionError, TreasuryManagerOperation};
 
 /// Performs the request call and records the transaction in the audit trail.
 pub async fn emit_transaction<R>(
     audit_trail: &mut AuditTrail,
-    agent: &impl CallCanisters,
+    agent: &impl AbstractAgent,
     canister_id: Principal,
     request: R,
     phase: TreasuryManagerOperation,

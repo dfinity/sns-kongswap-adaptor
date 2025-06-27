@@ -1,11 +1,11 @@
 use crate::{
+    agent::AbstractAgent,
     emit_transaction::emit_transaction,
-    kong_api::reply_params_to_result,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply,
     },
-    validation::{ValidatedAllowance, ValidatedBalances},
+    validation::{saturating_sub, ValidatedAllowance, ValidatedBalances},
     KongSwapAdaptor,
 };
 use candid::Nat;
@@ -16,8 +16,8 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
 const DEPOSIT_LEDGER_FEES_PER_TOKEN: u64 = 2;
 
-impl KongSwapAdaptor {
-    pub async fn deposit_impl(
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
+    async fn deposit_into_dex(
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
@@ -49,7 +49,7 @@ impl KongSwapAdaptor {
         for ValidatedAllowance {
             asset,
             amount_decimals,
-            expected_ledger_fee_decimals,
+            owner_account: _,
         } in [&allowance_0, &allowance_1]
         {
             let human_readable = format!(
@@ -57,7 +57,7 @@ impl KongSwapAdaptor {
                 asset.symbol()
             );
             let canister_id = asset.ledger_canister_id();
-            let fee_decimals = Nat::from(*expected_ledger_fee_decimals);
+            let fee_decimals = Nat::from(asset.ledger_fee_decimals());
             let fee = Some(fee_decimals.clone());
             let amount = Nat::from(amount_decimals.clone()) - fee_decimals;
 
@@ -98,10 +98,14 @@ impl KongSwapAdaptor {
         //
         // The call to `validate_allowances` above ensures that the amounts are still
         // sufficiently large.
-        let amount_0 = allowance_0.amount_decimals
-            - Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_0.expected_ledger_fee_decimals;
-        let amount_1 = allowance_1.amount_decimals
-            - Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_1.expected_ledger_fee_decimals;
+        let amount_0 = saturating_sub(
+            Nat::from(allowance_0.amount_decimals),
+            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_0.asset.ledger_fee_decimals(),
+        );
+        let amount_1 = saturating_sub(
+            Nat::from(allowance_1.amount_decimals),
+            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_1.asset.ledger_fee_decimals(),
+        );
 
         // Step 2. Ensure the tokens are registered with the DEX.
         // Notes on why we first add SNS and then ICP:
@@ -147,7 +151,6 @@ impl KongSwapAdaptor {
         match result {
             // All used up, since the pool is brand new.
             Ok(AddPoolReply {
-                status,
                 symbol_0,
                 address_0,
                 amount_0,
@@ -156,9 +159,8 @@ impl KongSwapAdaptor {
                 address_1,
                 ..
             }) => {
-                return reply_params_to_result(
-                    "add_pool", status, symbol_0, address_0, amount_0, symbol_1, amount_1,
-                    address_1,
+                return self.reply_params_to_result(
+                    symbol_0, address_0, amount_0, symbol_1, amount_1, address_1,
                 );
             }
 
@@ -227,7 +229,6 @@ impl KongSwapAdaptor {
         };
 
         let AddLiquidityReply {
-            status,
             symbol_0,
             address_0,
             amount_0,
@@ -244,15 +245,33 @@ impl KongSwapAdaptor {
             )));
         }
 
-        reply_params_to_result(
-            "add_liquidity",
-            status,
-            symbol_0,
-            address_0,
-            amount_0,
-            symbol_1,
-            amount_1,
-            address_1,
-        )
+        self.reply_params_to_result(symbol_0, address_0, amount_0, symbol_1, amount_1, address_1)
+    }
+
+    pub async fn deposit_impl(
+        &mut self,
+        allowance_0: ValidatedAllowance,
+        allowance_1: ValidatedAllowance,
+    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+        let deposit_into_dex_result = self.deposit_into_dex(allowance_0, allowance_1).await;
+
+        let returned_amounts_result = self
+            .return_remaining_assets_to_owner(
+                TreasuryManagerOperation::Withdraw,
+                allowance_0.owner_account,
+                allowance_1.owner_account,
+            )
+            .await;
+
+        match (deposit_into_dex_result, returned_amounts_result) {
+            (Ok(_), Ok(returned_amounts)) => Ok(returned_amounts),
+            (Ok(_), Err(errs)) => Err(errs),
+            (Err(err), Ok(_)) => Err(vec![err]),
+            (Err(err_1), Err(errs_2)) => {
+                let mut errs = vec![err_1];
+                errs.extend(errs_2.into_iter());
+                Err(errs)
+            }
+        }
     }
 }
