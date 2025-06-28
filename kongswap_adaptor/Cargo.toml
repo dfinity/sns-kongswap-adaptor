@@ -4,6 +4,10 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
+[lib]
+name = "kongswap_adaptor"
+path = "src/lib.rs"
+
 [[bin]]
 name = "kongswap-adaptor-canister"
 path = "src/canister.rs"
@@ -11,6 +15,10 @@ path = "src/canister.rs"
 [[test]]
 name = "e2e"
 path = "tests/e2e.rs"
+
+[[test]]
+name = "upgrade_twice"
+path = "tests/upgrade_twice.rs"
 
 [dependencies]
 candid = { workspace = true }

@@ -1,8 +1,7 @@
 use candid::{CandidType, Nat};
+use kongswap_adaptor::agent::Request;
 use serde::{Deserialize, Serialize};
 use sns_treasury_manager::{TransactionWitness, Transfer};
-
-use crate::agent::Request;
 
 const E8: u64 = 100_000_000; // 10^8, used for converting LP balances to decimals
 

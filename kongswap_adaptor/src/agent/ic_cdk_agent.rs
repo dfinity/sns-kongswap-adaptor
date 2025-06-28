@@ -2,6 +2,7 @@ use super::{AbstractAgent, Request};
 use candid::Principal;
 use thiserror::Error;
 
+#[derive(Clone, Copy)]
 pub struct CdkAgent {}
 
 impl CdkAgent {

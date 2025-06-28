@@ -1,10 +1,16 @@
-use crate::agent::{AbstractAgent, Request};
+use crate::{
+    log_err,
+    state::{storage::StableTransaction, KongSwapAdaptor},
+    StableAuditTrail,
+};
 use candid::Principal;
-use sns_treasury_manager::{AuditTrail, Transaction, TransactionError, TreasuryManagerOperation};
+use kongswap_adaptor::agent::{AbstractAgent, Request};
+use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use std::{cell::RefCell, thread::LocalKey};
 
 /// Performs the request call and records the transaction in the audit trail.
-pub async fn emit_transaction<R>(
-    audit_trail: &mut AuditTrail,
+async fn emit_transaction<R>(
+    audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
     agent: &impl AbstractAgent,
     canister_id: Principal,
     request: R,
@@ -23,7 +29,7 @@ where
             canister_id,
         });
 
-    let (transaction_result, function_output) = match call_result {
+    let (result, function_output) = match call_result {
         Err(err) => (Err(err.clone()), Err(err)),
         Ok(response) => {
             let res = request
@@ -37,15 +43,45 @@ where
         }
     };
 
-    let transaction = Transaction {
+    let transaction = StableTransaction {
         timestamp_ns: ic_cdk::api::time(),
         canister_id,
-        result: transaction_result,
+        result,
         human_readable,
         treasury_manager_operation,
     };
 
-    audit_trail.record_event(transaction);
+    audit_trail.with_borrow_mut(|audit_trail| {
+        if let Err(err) = audit_trail.push(&transaction) {
+            log_err(&format!(
+                "Cannot push transaction to audit trail: {}\ntransaction: {:?}",
+                err, transaction
+            ));
+        }
+    });
 
     function_output
+}
+
+impl<A: AbstractAgent> KongSwapAdaptor<A> {
+    pub(crate) async fn emit_transaction<R>(
+        &mut self,
+        canister_id: Principal,
+        request: R,
+        treasury_manager_operation: TreasuryManagerOperation,
+        human_readable: String,
+    ) -> Result<R::Ok, TransactionError>
+    where
+        R: Request + Clone,
+    {
+        emit_transaction(
+            self.audit_trail,
+            &self.agent,
+            canister_id,
+            request,
+            treasury_manager_operation,
+            human_readable,
+        )
+        .await
+    }
 }

@@ -24,7 +24,7 @@ pub trait Request: Send {
     ) -> Result<(TransactionWitness, Self::Ok), String>;
 }
 
-pub trait AbstractAgent: Send + Sync {
+pub trait AbstractAgent: Clone + Send + Sync {
     type Error: Display + Send + Error + 'static;
 
     fn call<R: Request>(

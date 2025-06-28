@@ -1,11 +1,10 @@
 use crate::{
-    agent::AbstractAgent,
-    emit_transaction::emit_transaction,
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
     validation::ValidatedBalances,
-    KongSwapAdaptor,
+    KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
+use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -18,22 +17,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."
                 .to_string();
 
+        let (asset_0, asset_1) = self.assets();
+
         let request = RemoveLiquidityArgs {
-            token_0: self.balances.asset_0.symbol(),
-            token_1: self.balances.asset_1.symbol(),
+            token_0: asset_0.symbol(),
+            token_1: asset_1.symbol(),
             remove_lp_token_amount,
         };
 
-        let RemoveLiquidityReply { claim_ids, .. } = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            self.kong_backend_canister_id,
-            request,
-            operation,
-            human_readable,
-        )
-        .await
-        .map_err(|err| vec![err])?;
+        let RemoveLiquidityReply { claim_ids, .. } = self
+            .emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
+                request,
+                operation,
+                human_readable,
+            )
+            .await
+            .map_err(|err| vec![err])?;
 
         if claim_ids.is_empty() {
             return Ok(());
@@ -48,18 +48,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let human_readable =
             "Calling KongSwapBackend.claims to check if a retry withdrawal is needed.".to_string();
 
-        let claims = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            self.kong_backend_canister_id,
-            ClaimsArgs {
-                principal_id: ic_cdk::api::id().to_string(),
-            },
-            operation,
-            human_readable,
-        )
-        .await
-        .map_err(|err| vec![err])?;
+        let claims = self
+            .emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
+                ClaimsArgs {
+                    principal_id: ic_cdk::api::id().to_string(),
+                },
+                operation,
+                human_readable,
+            )
+            .await
+            .map_err(|err| vec![err])?;
 
         let mut errors = vec![];
 
@@ -72,15 +71,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 symbol, claim_id,
             );
 
-            let response = emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                self.kong_backend_canister_id,
-                ClaimArgs { claim_id },
-                operation,
-                human_readable,
-            )
-            .await;
+            let response = self
+                .emit_transaction(
+                    *KONG_BACKEND_CANISTER_ID,
+                    ClaimArgs { claim_id },
+                    operation,
+                    human_readable,
+                )
+                .await;
 
             if let Err(err) = response {
                 errors.push(err);
