@@ -1,4 +1,5 @@
 use crate::{
+    accounting::MultiAssetAccounting,
     agent::AbstractAgent,
     validation::{ValidatedAsset, ValidatedBalances},
 };
@@ -11,6 +12,7 @@ pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
     pub kong_backend_canister_id: Principal,
     pub balances: ValidatedBalances,
     pub audit_trail: AuditTrail,
+    pub accounting: MultiAssetAccounting,
 }
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -34,11 +36,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             owner_account_1,
         };
 
+        let accounting = MultiAssetAccounting::new([asset_0, asset_1].to_vec());
+
         KongSwapAdaptor {
             agent,
             kong_backend_canister_id,
             audit_trail,
             balances,
+            accounting,
         }
     }
 }

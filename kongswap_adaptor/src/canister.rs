@@ -13,6 +13,7 @@ use sns_treasury_manager::{
 use state::KongSwapAdaptor;
 use std::{cell::RefCell, time::Duration};
 
+mod accounting;
 mod add_pool;
 mod agent;
 mod balances;

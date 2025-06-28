@@ -1,7 +1,12 @@
 use crate::{
-    agent::AbstractAgent, emit_transaction::emit_transaction, kong_types::RemoveLiquidityArgs,
-    validation::ValidatedBalances, KongSwapAdaptor,
+    accounting::{self, Party},
+    agent::AbstractAgent,
+    emit_transaction::emit_transaction,
+    kong_types::RemoveLiquidityArgs,
+    validation::ValidatedBalances,
+    KongSwapAdaptor,
 };
+use candid::Nat;
 use icrc_ledger_types::icrc1::account::Account;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
@@ -21,7 +26,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             remove_lp_token_amount,
         };
 
-        let _reply = emit_transaction(
+        let reply = emit_transaction(
             &mut self.audit_trail,
             &self.agent,
             self.kong_backend_canister_id,
@@ -32,6 +37,30 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         .await
         .map_err(|err| vec![err])?;
 
+        // ------ Book keeping ------
+        let entries_0 = accounting::create_ledger_entries(
+            Party::External,
+            Party::TreasuryManager,
+            reply.amount_0.clone(),
+            Nat::from(self.balances.asset_0.ledger_fee_decimals()),
+        )
+        .map_err(|err| vec![err])?;
+
+        self.accounting
+            .post_asset_transaction(&self.balances.asset_0, &entries_0);
+
+        let entries_1 = accounting::create_ledger_entries(
+            Party::External,
+            Party::TreasuryManager,
+            reply.amount_1.clone(),
+            Nat::from(self.balances.asset_1.ledger_fee_decimals()),
+        )
+        .map_err(|err| vec![err])?;
+
+        self.accounting
+            .post_asset_transaction(&self.balances.asset_1, &entries_1);
+
+        // -------------------------
         Ok(())
     }
 
@@ -49,6 +78,33 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 withdraw_account_1,
             )
             .await;
+
+        if let Ok(returned_amounts) = returned_amounts_result {
+            // ------ Book keeping ------
+            let entries_0 = accounting::create_ledger_entries(
+                Party::External,
+                Party::Sns,
+                Nat::from(returned_amounts.balance_0_decimals),
+                Nat::from(returned_amounts.asset_0.ledger_fee_decimals()),
+            )
+            .map_err(|err| vec![err])?;
+
+            self.accounting
+                .post_asset_transaction(&returned_amounts.asset_0, &entries_0);
+
+            let entries_1 = accounting::create_ledger_entries(
+                Party::External,
+                Party::TreasuryManager,
+                Nat::from(returned_amounts.balance_1_decimals),
+                Nat::from(returned_amounts.asset_1.ledger_fee_decimals()),
+            )
+            .map_err(|err| vec![err])?;
+
+            self.accounting
+                .post_asset_transaction(&returned_amounts.asset_1, &entries_1);
+
+            // -------------------------
+        }
 
         match (withdraw_from_dex_result, returned_amounts_result) {
             (Ok(_), Ok(returned_amounts)) => Ok(returned_amounts),
