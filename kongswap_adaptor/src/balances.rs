@@ -9,11 +9,6 @@ use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
-    pub fn get_cached_balances(&self) -> ValidatedBalances {
-        self.balances
-            .with_borrow(|balances| balances.expect("Balances should be initialized").clone())
-    }
-
     /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
     pub async fn refresh_ledger_metadata(
         &mut self,
@@ -125,10 +120,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 }
             }
 
-            self.balances.with_borrow_mut(|balances| {
-                if let Some(balances) = balances.as_mut() {
-                    balances.refresh_asset(asset_id, asset);
-                }
+            self.with_balances_mut(|balances| {
+                balances.refresh_asset(asset_id, asset);
             });
         }
 
@@ -138,7 +131,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
         let operation = TreasuryManagerOperation::Balances;
 
-        self.refresh_ledger_metadata(operation).await?;
+        if let Err(err) = self.refresh_ledger_metadata(operation).await {
+            log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
+        }
 
         let remove_lp_token_amount = self.lp_balance(operation).await?;
 
@@ -173,10 +168,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let balance_1_decimals =
             decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
 
-        self.balances.with_borrow_mut(|balances| {
-            if let Some(balances) = balances.as_mut() {
-                balances.set(balance_0_decimals, balance_1_decimals, ic_cdk::api::time());
-            }
+        self.with_balances_mut(|balances| {
+            balances.set(balance_0_decimals, balance_1_decimals, ic_cdk::api::time());
         });
 
         Ok(self.get_cached_balances())

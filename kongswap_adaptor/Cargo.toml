@@ -16,10 +16,6 @@ path = "src/canister.rs"
 name = "e2e"
 path = "tests/e2e.rs"
 
-[[test]]
-name = "upgrade_twice"
-path = "tests/upgrade_twice.rs"
-
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
@@ -34,6 +30,7 @@ itertools = "0.14.0"
 thiserror = "2.0.12"
 ic-canister-log = "0.2.0"
 icrc-ledger-types.workspace = true
+serde_json = "1.0.140"
 
 [dev-dependencies]
 pocket-ic = { workspace = true }

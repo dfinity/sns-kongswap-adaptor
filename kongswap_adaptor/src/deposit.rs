@@ -265,7 +265,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let returned_amounts_result = self
             .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::Withdraw,
+                TreasuryManagerOperation::Deposit,
                 allowance_0.owner_account,
                 allowance_1.owner_account,
             )

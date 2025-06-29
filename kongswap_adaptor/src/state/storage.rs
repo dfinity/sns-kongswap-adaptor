@@ -1,13 +1,39 @@
-use candid::{Decode, Encode, Principal};
+use crate::validation::ValidatedBalances;
+use candid::{CandidType, Decode, Encode, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
+use serde::Deserialize;
 use sns_treasury_manager::{
     Transaction, TransactionError, TransactionWitness, TreasuryManagerOperation,
 };
 use std::borrow::Cow;
 
-use crate::validation::ValidatedBalances;
+/// Configuration state of the KongSwapAdaptor canister (exclusing the `audit_trail`).
+#[derive(CandidType, Default, Deserialize)]
+pub(crate) enum ConfigState {
+    /// This state is only used between wasm module initialization and canister_init().
+    #[default]
+    Uninitialized,
 
-#[derive(candid::CandidType, candid::Deserialize, Clone, Debug)]
+    /// Includes only `balances` from `KongSwapAdaptor`, since `audit_trail` is stored separately.
+    Initialized(ValidatedBalances),
+}
+
+impl Storable for ConfigState {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("Cannot encode ConfigState"))
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).expect("Cannot decode ConfigState")
+    }
+
+    const BOUND: Bound = Bound::Bounded {
+        max_size: 1024,
+        is_fixed_size: true,
+    };
+}
+
+#[derive(CandidType, candid::Deserialize, Clone, Debug)]
 pub(crate) struct StableTransaction {
     pub timestamp_ns: u64,
     pub canister_id: Principal,
@@ -26,23 +52,9 @@ impl Storable for StableTransaction {
     }
 
     const BOUND: Bound = Bound::Bounded {
+        // TODO: Enforce this bound.
         max_size: 2048, // Increased size to accommodate all fields
         is_fixed_size: false,
-    };
-}
-
-impl Storable for ValidatedBalances {
-    fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
-    }
-
-    fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
-    }
-
-    const BOUND: Bound = Bound::Bounded {
-        max_size: 410,
-        is_fixed_size: true,
     };
 }
 

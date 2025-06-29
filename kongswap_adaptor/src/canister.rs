@@ -1,13 +1,13 @@
-use crate::state::storage::StableTransaction;
+use crate::state::storage::{ConfigState, StableTransaction};
 use crate::validation::ValidatedBalances;
 use crate::validation::{
     ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
 use candid::Principal;
 use ic_canister_log::{declare_log_buffer, log};
-use ic_cdk::{init, post_upgrade, query, update};
+use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
-use ic_stable_structures::{DefaultMemoryImpl, Vec as StableVec};
+use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
 use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
@@ -34,6 +34,7 @@ const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // o
 
 pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) type StableAuditTrail = StableVec<StableTransaction, Memory>;
+pub(crate) type StableBalances = StableCell<ConfigState, Memory>;
 
 // Canister ID from the mainnet.
 // See https://dashboard.internetcomputer.org/canister/2ipq2-uqaaa-aaaar-qailq-cai
@@ -44,13 +45,23 @@ lazy_static! {
         Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
 }
 
-const AUDIT_TRAIL_MEMORY_ID: MemoryId = MemoryId::new(0);
+const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(0);
+const AUDIT_TRAIL_MEMORY_ID: MemoryId = MemoryId::new(1);
 
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
         RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
 
-    static BALANCES: RefCell<Option<ValidatedBalances>> = RefCell::new(None);
+    static BALANCES: RefCell<StableBalances> =
+        MEMORY_MANAGER.with(|memory_manager|
+            RefCell::new(
+                StableCell::init(
+                    memory_manager.borrow().get(BALANCES_MEMORY_ID),
+                    ConfigState::default()
+                )
+                .expect("BALANCES init should not cause errors")
+            )
+        );
 
     static AUDIT_TRAIL: RefCell<StableAuditTrail> =
         MEMORY_MANAGER.with(|memory_manager|
@@ -263,14 +274,14 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .try_into()
         .expect("Failed to validate TreasuryManagerInit.");
 
-    let starting_balances = ValidatedBalances::new_with_zeros(
+    let init_balances = ValidatedBalances::new_with_zeros(
         allowance_0.asset,
         allowance_1.asset,
         allowance_0.owner_account,
         allowance_1.owner_account,
     );
 
-    canister_state().balances.replace(Some(starting_balances));
+    canister_state().initialize(init_balances);
 
     init_periodic_tasks();
 
@@ -280,6 +291,11 @@ async fn canister_init(arg: TreasuryManagerArg) {
     ic_cdk_timers::set_timer(Duration::ZERO, || {
         ic_cdk::spawn(init_async(allowance_0, allowance_1))
     });
+}
+
+#[pre_upgrade]
+fn canister_pre_upgrade() {
+    log("pre_upgrade.");
 }
 
 #[post_upgrade]

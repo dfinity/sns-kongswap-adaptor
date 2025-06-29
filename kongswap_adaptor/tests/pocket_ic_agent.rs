@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use candid::Principal;
 use kongswap_adaptor::agent::{AbstractAgent, Request};
 use pocket_ic::nonblocking::PocketIc;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Clone)]
