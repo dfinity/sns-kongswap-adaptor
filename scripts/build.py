@@ -2,34 +2,11 @@
 # filepath: /home/arshavir/sns-kongswap-adaptor/scripts/build.py
 
 import gzip
-import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
-def run_command(cmd, cwd=None, description=None):
-    """Run a command with error handling."""
-    if description:
-        print(f"{description}...")
-    
-    try:
-        result = subprocess.run(cmd, cwd=cwd, check=True, 
-                              capture_output=True, text=True)
-        return result
-    except subprocess.CalledProcessError as e:
-        print(f"Error running command: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
-        print(f"Return code: {e.returncode}")
-        if e.stdout:
-            print(f"Stdout: {e.stdout}")
-        if e.stderr:
-            print(f"Stderr: {e.stderr}")
-        sys.exit(1)
-
-def run_ic_wasm(args, cwd=None):
-    """Run ic-wasm command with error handling."""
-    cmd = ["ic-wasm"] + args
-    return run_command(cmd, cwd=cwd)
+from common import run_command, run_ic_wasm, get_project_paths, validate_project_structure
 
 def compress_file(input_path, output_path):
     """Compress a file using gzip with maximum compression."""
@@ -38,17 +15,9 @@ def compress_file(input_path, output_path):
             shutil.copyfileobj(f_in, f_out)
 
 def main():
-    # Configuration
-    KONGSWAP_ADAPTOR_CANISTER = "kongswap-adaptor-canister.wasm"
-    HOME = Path.home()
-    PROJECT_DIR = HOME / "sns-kongswap-adaptor"
-    WASM_DIR = PROJECT_DIR / "target" / "wasm32-unknown-unknown" / "release"
-    CANDID = PROJECT_DIR / "kongswap_adaptor" / "kongswap-adaptor.did"
-    
-    # Validate project directory exists
-    if not PROJECT_DIR.exists():
-        print(f"Error: Project directory does not exist: {PROJECT_DIR}")
-        sys.exit(1)
+    # Get project paths
+    paths = get_project_paths()
+    validate_project_structure(paths)
     
     # Build the project
     print("Building Rust project...")
@@ -59,21 +28,21 @@ def main():
         "--bin", "kongswap-adaptor-canister"
     ]
     
-    run_command(cargo_cmd, cwd=PROJECT_DIR, description="Running cargo build")
+    run_command(cargo_cmd, cwd=paths['project_dir'], description="Running cargo build")
     
     # Validate paths after build
-    if not WASM_DIR.exists():
-        print(f"Error: WASM directory does not exist after build: {WASM_DIR}")
+    if not paths['wasm_dir'].exists():
+        print(f"Error: WASM directory does not exist after build: {paths['wasm_dir']}")
         sys.exit(1)
     
-    if not CANDID.exists():
-        print(f"Error: Candid file does not exist: {CANDID}")
+    if not paths['candid'].exists():
+        print(f"Error: Candid file does not exist: {paths['candid']}")
         sys.exit(1)
     
     # File paths
-    original_wasm = WASM_DIR / KONGSWAP_ADAPTOR_CANISTER
-    augmented_wasm = WASM_DIR / f"augmented-{KONGSWAP_ADAPTOR_CANISTER}"
-    final_compressed = WASM_DIR / f"{KONGSWAP_ADAPTOR_CANISTER}.gz"
+    original_wasm = paths['wasm_dir'] / paths['kongswap_canister']
+    augmented_wasm = paths['wasm_dir'] / f"augmented-{paths['kongswap_canister']}"
+    final_compressed = paths['wasm_dir'] / paths['kongswap_canister_gz']
     
     if not original_wasm.exists():
         print(f"Error: Original WASM file does not exist after build: {original_wasm}")
@@ -85,7 +54,7 @@ def main():
             "-o", str(augmented_wasm),
             str(original_wasm),
             "metadata", "-v", "public",
-            "candid:service", "-f", str(CANDID)
+            "candid:service", "-f", str(paths['candid'])
         ])
         
         print("Optimizing WASM...")

@@ -35,8 +35,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
-        if claim_ids.is_empty() {
-            return Ok(());
+        if !claim_ids.is_empty() {
+            let claim_ids = claim_ids
+                .iter()
+                .map(|claim_id| claim_id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(vec![TransactionError::Backend(format!(
+                "Withdrawal from DEX might not be complete, returned claims: {}.",
+                claim_ids
+            ))]);
         }
 
         Ok(())
