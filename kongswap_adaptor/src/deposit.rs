@@ -1,15 +1,14 @@
 use crate::{
-    agent::AbstractAgent,
-    emit_transaction::emit_transaction,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply,
     },
     validation::{saturating_sub, ValidatedAllowance, ValidatedBalances},
-    KongSwapAdaptor,
+    KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
+use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 /// How many ledger transaction that incur fees are required for a deposit operation (per token).
@@ -22,15 +21,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, TransactionError> {
-        let phase = TreasuryManagerOperation::Deposit;
+        let operation = TreasuryManagerOperation::Deposit;
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
         {
             let new_ledger_0 = allowance_0.asset.ledger_canister_id();
             let new_ledger_1 = allowance_1.asset.ledger_canister_id();
 
-            let old_asset_0 = self.balances.asset_0;
-            let old_asset_1 = self.balances.asset_1;
+            let (old_asset_0, old_asset_1) = self.assets();
 
             if new_ledger_0 != old_asset_0.ledger_canister_id()
                 || new_ledger_1 != old_asset_1.ledger_canister_id()
@@ -64,7 +62,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             let request = ApproveArgs {
                 from_subaccount: None,
                 spender: Account {
-                    owner: self.kong_backend_canister_id,
+                    owner: *KONG_BACKEND_CANISTER_ID,
                     subaccount: None,
                 },
 
@@ -79,15 +77,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 fee,
             };
 
-            emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await?;
+            self.emit_transaction(canister_id, request, operation, human_readable)
+                .await?;
         }
 
         let ledger_0 = allowance_0.asset.ledger_canister_id();
@@ -111,11 +102,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.
         // - The ICP token is assumed to have index 2.
-        self.maybe_add_token(ledger_0, phase).await?;
-        self.maybe_add_token(ledger_1, phase).await?;
+        // https://github.com/KongSwap/kong/blob/fe-predictions-update/src/kong_lib/src/ic/icp.rs#L1
+        self.maybe_add_token(ledger_0, operation).await?;
+        self.maybe_add_token(ledger_1, operation).await?;
 
         // Step 3. Fetch the latest ledger metadata, including symbols and ledger fees.
-        self.refresh_ledger_metadata(phase).await?;
+        self.refresh_ledger_metadata(operation).await?;
 
         // Step 4. Ensure the pool exists.
 
@@ -124,29 +116,33 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let original_amount_1 = amount_1.clone();
 
-        let result = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            self.kong_backend_canister_id,
-            AddPoolArgs {
-                token_0: token_0.clone(),
-                amount_0: amount_0.clone(),
-                token_1: token_1.clone(),
-                amount_1,
+        let result = self
+            .emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
+                AddPoolArgs {
+                    token_0: token_0.clone(),
+                    amount_0: amount_0.clone(),
+                    token_1: token_1.clone(),
+                    amount_1,
 
-                // Liquidity provider fee in basis points 30=0.3%.
-                lp_fee_bps: Some(30),
+                    // Liquidity provider fee in basis points 30=0.3%.
+                    lp_fee_bps: Some(30),
 
-                // Not needed for the ICRC2 flow.
-                tx_id_0: None,
-                tx_id_1: None,
-            },
-            TreasuryManagerOperation::Deposit,
-            "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
-        )
-        .await;
+                    // Not needed for the ICRC2 flow.
+                    tx_id_0: None,
+                    tx_id_1: None,
+                },
+                TreasuryManagerOperation::Deposit,
+                "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
+            )
+            .await;
 
-        let pool_already_exists = { format!("Pool {} already exists", self.lp_token()) };
+        let lp_toke_symbol = self.lp_token();
+
+        let tolerated_errors = [
+            format!("LP token {} already exists", lp_toke_symbol),
+            format!("Pool {} already exists", lp_toke_symbol),
+        ];
 
         match result {
             // All used up, since the pool is brand new.
@@ -160,12 +156,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ..
             }) => {
                 return self.reply_params_to_result(
-                    symbol_0, address_0, amount_0, symbol_1, amount_1, address_1,
+                    symbol_0,
+                    address_0,
+                    amount_0,
+                    allowance_0.owner_account,
+                    symbol_1,
+                    amount_1,
+                    address_1,
+                    allowance_1.owner_account,
                 );
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
-            Err(TransactionError::Backend(err)) if *err == pool_already_exists => (),
+            Err(TransactionError::Backend(err)) if tolerated_errors.contains(&err) => (),
 
             Err(err) => {
                 return Err(err);
@@ -188,12 +191,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 token_1: token_1.clone(),
             };
 
-            emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                self.kong_backend_canister_id,
+            self.emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?
@@ -217,12 +218,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 tx_id_1: None,
             };
 
-            emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                self.kong_backend_canister_id,
+            self.emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
                 request,
-                phase,
+                operation,
                 human_readable,
             )
             .await?
@@ -245,7 +244,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )));
         }
 
-        self.reply_params_to_result(symbol_0, address_0, amount_0, symbol_1, amount_1, address_1)
+        self.reply_params_to_result(
+            symbol_0,
+            address_0,
+            amount_0,
+            allowance_0.owner_account,
+            symbol_1,
+            amount_1,
+            address_1,
+            allowance_1.owner_account,
+        )
     }
 
     pub async fn deposit_impl(
@@ -257,7 +265,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let returned_amounts_result = self
             .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::Withdraw,
+                TreasuryManagerOperation::Deposit,
                 allowance_0.owner_account,
                 allowance_1.owner_account,
             )

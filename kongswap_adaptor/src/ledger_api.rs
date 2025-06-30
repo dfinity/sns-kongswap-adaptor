@@ -1,21 +1,19 @@
+use crate::{
+    state::KongSwapAdaptor,
+    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
+};
 use candid::Nat;
 use icrc_ledger_types::icrc1::{
     account::Account,
     transfer::{Memo, TransferArg},
 };
+use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
-
-use crate::{
-    agent::AbstractAgent,
-    emit_transaction::emit_transaction,
-    state::KongSwapAdaptor,
-    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
-};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn get_ledger_balance_decimals(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
         asset: ValidatedAsset,
     ) -> Result<u64, TransactionError> {
         let ledger_canister_id = asset.ledger_canister_id();
@@ -31,15 +29,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             asset.symbol(),
         );
 
-        let balance_decimals = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            ledger_canister_id,
-            request,
-            phase,
-            human_readable,
-        )
-        .await?;
+        let balance_decimals = self
+            .emit_transaction(ledger_canister_id, request, operation, human_readable)
+            .await?;
 
         let balance_decimals =
             decode_nat_to_u64(balance_decimals).map_err(TransactionError::Postcondition)?;
@@ -49,16 +41,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     async fn get_ledger_balances(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<(u64, u64), Vec<TransactionError>> {
-        // TODO: These calls could be parallelized.
-        let balance_0_decimals = self
-            .get_ledger_balance_decimals(phase, self.balances.asset_0)
-            .await;
+        let (asset_0, asset_1) = self.assets();
 
-        let balance_1_decimals = self
-            .get_ledger_balance_decimals(phase, self.balances.asset_1)
-            .await;
+        // TODO: These calls could be parallelized.
+        let balance_0_decimals = self.get_ledger_balance_decimals(operation, asset_0).await;
+
+        let balance_1_decimals = self.get_ledger_balance_decimals(operation, asset_1).await;
 
         match (balance_0_decimals, balance_1_decimals) {
             (Ok(balance_0), Ok(balance_1)) => Ok((balance_0, balance_1)),
@@ -69,17 +59,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub(crate) async fn return_remaining_assets_to_owner(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
     ) -> Result<ValidatedBalances, Vec<TransactionError>> {
-        let asset_0 = self.balances.asset_0.clone();
-        let asset_1 = self.balances.asset_1.clone();
+        let (asset_0, asset_1) = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
 
         let (return_amount_0_decimals, return_amount_1_decimals) = {
-            let (balance_0_decimals, balance_1_decimals) = self.get_ledger_balances(phase).await?;
+            let (balance_0_decimals, balance_1_decimals) =
+                self.get_ledger_balances(operation).await?;
 
             let return_amount_0_decimals =
                 balance_0_decimals.saturating_sub(asset_0.ledger_fee_decimals());
@@ -115,19 +105,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 to: withdraw_account,
                 fee: Some(Nat::from(asset.ledger_fee_decimals())),
                 created_at_time: Some(ic_cdk::api::time()),
-                memo: Some(Memo::from(Vec::<u8>::from(phase))),
+                memo: Some(Memo::from(Vec::<u8>::from(operation))),
                 amount: Nat::from(amount_decimals),
             };
 
-            let result = emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                ledger_canister_id,
-                request,
-                phase,
-                human_readable,
-            )
-            .await;
+            let result = self
+                .emit_transaction(ledger_canister_id, request, operation, human_readable)
+                .await;
 
             if let Err(err) = result {
                 withdraw_errors.push(err);
@@ -138,12 +122,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        Ok(ValidatedBalances {
+        let returned_amounts = ValidatedBalances {
+            timestamp_ns: ic_cdk::api::time(),
             asset_0,
             asset_1,
             balance_0_decimals: return_amount_0_decimals,
             balance_1_decimals: return_amount_1_decimals,
-            timestamp_ns: ic_cdk::api::time(),
-        })
+            owner_account_0: withdraw_account_0,
+            owner_account_1: withdraw_account_1,
+        };
+
+        Ok(returned_amounts)
     }
 }

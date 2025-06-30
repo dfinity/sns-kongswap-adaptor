@@ -1,32 +1,28 @@
-use candid::{Nat, Principal};
-use itertools::{Either, Itertools};
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
-use std::collections::BTreeMap;
-
 use crate::{
-    agent::AbstractAgent,
-    emit_transaction::emit_transaction,
     kong_types::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
     validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
-    KongSwapAdaptor,
+    KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
+use candid::{Nat, Principal};
+use icrc_ledger_types::icrc1::account::Account;
+use itertools::{Either, Itertools};
+use kongswap_adaptor::agent::AbstractAgent;
+use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn lp_token(&self) -> String {
-        format!(
-            "{}_{}",
-            self.balances.asset_0.symbol(),
-            self.balances.asset_1.symbol()
-        )
+        let (asset_0, asset_1) = self.assets();
+        format!("{}_{}", asset_0.symbol(), asset_1.symbol())
     }
 
     pub async fn maybe_add_token(
         &mut self,
         ledger_canister_id: Principal,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<(), TransactionError> {
         let token = format!("IC.{}", ledger_canister_id);
 
@@ -39,15 +35,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             token: token.clone(),
         };
 
-        let response = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            self.kong_backend_canister_id,
-            request,
-            phase,
-            human_readable,
-        )
-        .await;
+        let response = self
+            .emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
+                request,
+                operation,
+                human_readable,
+            )
+            .await;
 
         match response {
             Ok(_) => Ok(()),
@@ -62,7 +57,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn lp_balance(
         &mut self,
-        phase: TreasuryManagerOperation,
+        operation: TreasuryManagerOperation,
     ) -> Result<Nat, TransactionError> {
         let request = UserBalancesArgs {
             principal_id: ic_cdk::api::id().to_string(),
@@ -71,15 +66,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let human_readable =
             "Calling KongSwapBackend.user_balances to get LP balances.".to_string();
 
-        let replies = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            self.kong_backend_canister_id,
-            request,
-            phase,
-            human_readable,
-        )
-        .await?;
+        let replies = self
+            .emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
+                request,
+                operation,
+                human_readable,
+            )
+            .await?;
 
         if replies.is_empty() {
             return Ok(Nat::from(0_u8));
@@ -97,8 +91,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 }
             },
         );
-
-        ic_cdk::println!("lp_balance >>> {:#?}", balances);
 
         if !errors.is_empty() {
             return Err(TransactionError::Backend(format!(
@@ -124,12 +116,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         symbol_0: String,
         address_0: String,
         amount_0: Nat,
+        owner_account_0: Account,
         symbol_1: String,
         amount_1: Nat,
         address_1: String,
+        owner_account_1: Account,
     ) -> Result<ValidatedBalances, TransactionError> {
-        let fee_0 = self.balances.asset_0.ledger_fee_decimals();
-        let fee_1 = self.balances.asset_1.ledger_fee_decimals();
+        let (fee_0, fee_1) = self.fees();
 
         let asset_0 = ValidatedAsset::try_from((symbol_0, address_0, fee_0))
             .map_err(TransactionError::Postcondition)?;
@@ -147,7 +140,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             asset_1,
             balance_0_decimals,
             balance_1_decimals,
-            ic_cdk::api::time(),
+            owner_account_0,
+            owner_account_1,
         ))
     }
 }
