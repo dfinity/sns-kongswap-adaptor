@@ -1,6 +1,8 @@
 //! This module contains implementations of the `Request` trait for some ICRC-1 and ICRC-2
 //! functions used in the KongSwapAdaptor canister. See https://github.com/dfinity/ICRC-1
 
+use crate::audit::serialize_reply;
+
 use super::Request;
 use candid::{CandidType, Error, Nat, Principal};
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
@@ -121,7 +123,7 @@ impl Request for Icrc1MetadataRequest {
         _canister_id: Principal,
         response: Self::Response,
     ) -> Result<(TransactionWitness, Self::Ok), String> {
-        let response_str = format!("{:?}", response);
+        let response_str = serialize_reply(&response);
         Ok((TransactionWitness::NonLedger(response_str), response))
     }
 }

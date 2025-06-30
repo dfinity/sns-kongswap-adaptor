@@ -1,5 +1,5 @@
 use candid::{CandidType, Nat};
-use kongswap_adaptor::agent::Request;
+use kongswap_adaptor::{agent::Request, audit::serialize_reply};
 use serde::{Deserialize, Serialize};
 use sns_treasury_manager::{TransactionWitness, Transfer};
 
@@ -74,8 +74,7 @@ impl Request for AddLiquidityAmountsArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", reply));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -104,7 +103,10 @@ impl Request for AddLiquidityArgs {
         let reply = response?;
 
         if reply.status != "Success" {
-            return Err(format!("Failed to add liquidity, status: {}", reply.status));
+            return Err(format!(
+                "Failed to add liquidity: {}",
+                serialize_reply(&reply)
+            ));
         }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
@@ -194,8 +196,7 @@ impl Request for AddTokenArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", self));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -259,8 +260,7 @@ impl Request for UpdateTokenArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", self));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -289,7 +289,7 @@ impl Request for AddPoolArgs {
         let reply = response?;
 
         if reply.status != "Success" {
-            return Err(format!("Failed to add pool, status: {}", reply.status));
+            return Err(format!("Failed to add pool: {}", serialize_reply(&reply)));
         }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
@@ -391,8 +391,7 @@ impl Request for RemoveLiquidityAmountsArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", reply));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -445,8 +444,8 @@ impl Request for RemoveLiquidityArgs {
 
         if reply.status != "Success" {
             return Err(format!(
-                "Failed to remove liquidity, status: {}",
-                reply.status
+                "Failed to remove liquidity: {}",
+                serialize_reply(&reply)
             ));
         }
 
@@ -509,15 +508,7 @@ impl Request for UserBalancesArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let replies = response?;
 
-        let witnesses = replies
-            .iter()
-            .map(|UserBalancesReply::LP(user_balance_lp_reply)| {
-                // TODO: Use serde_json::to_string
-                format!("{:?}", user_balance_lp_reply)
-            })
-            .collect::<Vec<_>>();
-
-        let witness = TransactionWitness::NonLedger(witnesses.join(", "));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&replies));
 
         Ok((witness, replies))
     }
@@ -595,12 +586,7 @@ impl Request for ClaimsArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let replies = response?;
 
-        let witnesses = replies
-            .iter()
-            .map(|claim_reply| format!("{:?}", claim_reply))
-            .collect::<Vec<_>>();
-
-        let witness = TransactionWitness::NonLedger(witnesses.join(", "));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&replies));
 
         Ok((witness, replies))
     }
@@ -649,7 +635,7 @@ impl Request for ClaimArgs {
         let reply = response?;
 
         if reply.status != "Success" {
-            return Err(format!("Failed to claim, status: {}", reply.status));
+            return Err(format!("Failed to claim: {}", serialize_reply(&reply)));
         }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
