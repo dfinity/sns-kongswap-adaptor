@@ -3,7 +3,6 @@ use crate::{
     emit_transaction::emit_transaction,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
-        AddPoolArgs, AddPoolReply,
     },
     validation::{saturating_sub, ValidatedAllowance, ValidatedBalances},
     KongSwapAdaptor,
@@ -125,56 +124,25 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let original_amount_1 = amount_1.clone();
 
-        let result = emit_transaction(
-            &mut self.audit_trail,
-            &self.agent,
-            self.kong_backend_canister_id,
-            AddPoolArgs {
-                token_0: token_0.clone(),
-                amount_0: amount_0.clone(),
-                token_1: token_1.clone(),
-                amount_1,
-
-                // Liquidity provider fee in basis points 30=0.3%.
-                lp_fee_bps: Some(30),
-
-                // Not needed for the ICRC2 flow.
-                tx_id_0: None,
-                tx_id_1: None,
-            },
-            TreasuryManagerOperation::Deposit,
-            "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
-        )
-        .await;
-
         let tolerated_errors = [
             format!("LP token {} already exists", self.lp_token()),
             format!("Pool {} already exists", self.lp_token()),
         ];
 
-        match result {
-            // All used up, since the pool is brand new.
-            Ok(AddPoolReply {
-                symbol_0,
-                address_0,
-                amount_0,
-                symbol_1,
-                amount_1,
-                address_1,
-                ..
-            }) => {
-                return self.reply_params_to_result(
-                    symbol_0,
-                    address_0,
-                    amount_0,
-                    allowance_0.owner_account,
-                    symbol_1,
-                    amount_1,
-                    address_1,
-                    allowance_1.owner_account,
-                );
+        match self
+            .try_add_pool(
+                &amount_0,
+                &amount_1,
+                ledger_0,
+                ledger_1,
+                allowance_0.owner_account,
+                allowance_1.owner_account,
+            )
+            .await
+        {
+            Ok(balances) => {
+                return Ok(balances);
             }
-
             // An already-existing pool does not preclude a top-up  =>  Keep going.
             Err(TransactionError::Backend(err)) if tolerated_errors.contains(&err) => (),
 
@@ -185,7 +153,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // This is a top-up operation for a pre-existing pool.
         // A top-up requires computing amount_1 as a function of amount_0.
-
         let AddLiquidityAmountsReply { amount_1, .. } = {
             let human_readable = format!(
                 "Calling KongSwapBackend.add_liquidity_amounts to estimate how much liquidity can \
