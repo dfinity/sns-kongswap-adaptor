@@ -555,3 +555,109 @@ pub struct UserBalanceLPReply {
 }
 
 // ----------------- end:user_balances -----------------
+
+// ----------------- begin:claims -----------------
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimsArgs {
+    pub principal_id: String,
+}
+
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimsReply {
+    pub claim_id: u64,
+    pub status: String,
+    pub chain: String,
+    pub symbol: String,
+    pub canister_id: Option<String>,
+    pub amount: Nat,
+    pub fee: Nat,
+    pub to_address: String,
+    pub desc: String,
+    pub ts: u64,
+}
+
+impl Request for ClaimsArgs {
+    fn method(&self) -> &'static str {
+        "claims"
+    }
+
+    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
+        candid::encode_one(&self.principal_id)
+    }
+
+    type Response = Result<Vec<ClaimsReply>, String>;
+
+    type Ok = Vec<ClaimsReply>;
+
+    fn transaction_witness(
+        &self,
+        _canister_id: candid::Principal,
+        response: Self::Response,
+    ) -> Result<(TransactionWitness, Self::Ok), String> {
+        let replies = response?;
+
+        let witnesses = replies
+            .iter()
+            .map(|claim_reply| format!("{:?}", claim_reply))
+            .collect::<Vec<_>>();
+
+        let witness = TransactionWitness::NonLedger(witnesses.join(", "));
+
+        Ok((witness, replies))
+    }
+}
+// ----------------- end:claims -----------------
+
+// ----------------- begin:claim -----------------
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimArgs {
+    pub claim_id: u64,
+}
+
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimReply {
+    pub claim_id: u64,
+    pub status: String,
+    pub chain: String,
+    pub symbol: String,
+    pub canister_id: Option<String>,
+    pub amount: Nat,
+    pub fee: Nat,
+    pub to_address: String,
+    pub desc: String,
+    pub transfer_ids: Vec<TransferIdReply>,
+    pub ts: u64,
+}
+
+impl Request for ClaimArgs {
+    fn method(&self) -> &'static str {
+        "claim"
+    }
+
+    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
+        candid::encode_one(&self.claim_id)
+    }
+
+    type Response = Result<ClaimReply, String>;
+
+    type Ok = ClaimReply;
+
+    fn transaction_witness(
+        &self,
+        _canister_id: candid::Principal,
+        response: Self::Response,
+    ) -> Result<(TransactionWitness, Self::Ok), String> {
+        let reply = response?;
+
+        if reply.status != "Success" {
+            return Err(format!("Failed to claim, status: {}", reply.status));
+        }
+
+        let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
+
+        let witness = TransactionWitness::Ledger(transfers);
+
+        Ok((witness, reply))
+    }
+}
+// ----------------- end:claim -----------------
