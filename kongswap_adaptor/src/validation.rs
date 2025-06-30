@@ -338,7 +338,7 @@ fn take_bytes(input: &str) -> [u8; MAX_SYMBOL_BYTES] {
 }
 
 fn is_valid_symbol_character(b: &u8) -> bool {
-    *b == 0 || b.is_ascii() && b.is_ascii_graphic()
+    *b == 0 || b.is_ascii_graphic()
 }
 
 #[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -560,7 +560,7 @@ impl ValidatedBalances {
         }
     }
 
-    pub fn new_with_zeros(
+    pub fn new_with_zero_balances(
         asset_0: ValidatedAsset,
         asset_1: ValidatedAsset,
         owner_account_0: Account,
@@ -618,7 +618,7 @@ impl ValidatedBalances {
                 "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
                 asset_id,
                 old_asset.ledger_fee_decimals(),
-                new_symbol,
+                new_ledger_fee_decimals,
             ));
         }
     }

@@ -1,5 +1,5 @@
 use crate::validation::ValidatedBalances;
-use candid::{CandidType, Decode, Encode, Principal};
+use candid::{CandidType, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
 use serde::Deserialize;
 use sns_treasury_manager::{
@@ -44,11 +44,11 @@ pub(crate) struct StableTransaction {
 
 impl Storable for StableTransaction {
     fn to_bytes(&self) -> Cow<[u8]> {
-        Cow::Owned(Encode!(self).unwrap())
+        Cow::Owned(candid::encode_one(self).expect("Cannot encode StableTransaction"))
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Self {
-        Decode!(bytes.as_ref(), Self).unwrap()
+        candid::decode_one(&bytes).expect("Cannot decode StableTransaction")
     }
 
     const BOUND: Bound = Bound::Bounded {

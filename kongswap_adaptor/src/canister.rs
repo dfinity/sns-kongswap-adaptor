@@ -30,7 +30,7 @@ mod state;
 mod validation;
 mod withdraw;
 
-const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hou
+const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
 pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) type StableAuditTrail = StableVec<StableTransaction, Memory>;
@@ -274,7 +274,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .try_into()
         .expect("Failed to validate TreasuryManagerInit.");
 
-    let init_balances = ValidatedBalances::new_with_zeros(
+    let init_balances = ValidatedBalances::new_with_zero_balances(
         allowance_0.asset,
         allowance_1.asset,
         allowance_0.owner_account,
