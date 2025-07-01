@@ -23,7 +23,7 @@ type BalancesForAsset = record {
 
 type Balances = record {
   timestamp_ns : nat64;
-  asset_to_balances : vec record { Asset; BalancesForAsset };
+  asset_to_balances : opt vec record { Asset; BalancesForAsset };
 };
 
 type Balance = record {
