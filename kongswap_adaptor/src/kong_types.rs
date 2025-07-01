@@ -1,8 +1,7 @@
 use candid::{CandidType, Nat};
+use kongswap_adaptor::{agent::Request, audit::serialize_reply};
 use serde::{Deserialize, Serialize};
 use sns_treasury_manager::{TransactionWitness, Transfer};
-
-use crate::agent::Request;
 
 const E8: u64 = 100_000_000; // 10^8, used for converting LP balances to decimals
 
@@ -75,8 +74,7 @@ impl Request for AddLiquidityAmountsArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", reply));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -105,7 +103,10 @@ impl Request for AddLiquidityArgs {
         let reply = response?;
 
         if reply.status != "Success" {
-            return Err(format!("Failed to add liquidity, status: {}", reply.status));
+            return Err(format!(
+                "Failed to add liquidity: {}",
+                serialize_reply(&reply)
+            ));
         }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
@@ -195,8 +196,7 @@ impl Request for AddTokenArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", self));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -260,8 +260,7 @@ impl Request for UpdateTokenArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", self));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -290,7 +289,7 @@ impl Request for AddPoolArgs {
         let reply = response?;
 
         if reply.status != "Success" {
-            return Err(format!("Failed to add pool, status: {}", reply.status));
+            return Err(format!("Failed to add pool: {}", serialize_reply(&reply)));
         }
 
         let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
@@ -392,8 +391,7 @@ impl Request for RemoveLiquidityAmountsArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let reply = response?;
 
-        // TODO: Use serde_json::to_string
-        let witness = TransactionWitness::NonLedger(format!("{:?}", reply));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&reply));
 
         Ok((witness, reply))
     }
@@ -446,8 +444,8 @@ impl Request for RemoveLiquidityArgs {
 
         if reply.status != "Success" {
             return Err(format!(
-                "Failed to remove liquidity, status: {}",
-                reply.status
+                "Failed to remove liquidity: {}",
+                serialize_reply(&reply)
             ));
         }
 
@@ -510,15 +508,7 @@ impl Request for UserBalancesArgs {
     ) -> Result<(TransactionWitness, Self::Ok), String> {
         let replies = response?;
 
-        let witnesses = replies
-            .iter()
-            .map(|UserBalancesReply::LP(user_balance_lp_reply)| {
-                // TODO: Use serde_json::to_string
-                format!("{:?}", user_balance_lp_reply)
-            })
-            .collect::<Vec<_>>();
-
-        let witness = TransactionWitness::NonLedger(witnesses.join(", "));
+        let witness = TransactionWitness::NonLedger(serialize_reply(&replies));
 
         Ok((witness, replies))
     }
@@ -555,3 +545,104 @@ pub struct UserBalanceLPReply {
 }
 
 // ----------------- end:user_balances -----------------
+
+// ----------------- begin:claims -----------------
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimsArgs {
+    pub principal_id: String,
+}
+
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimsReply {
+    pub claim_id: u64,
+    pub status: String,
+    pub chain: String,
+    pub symbol: String,
+    pub canister_id: Option<String>,
+    pub amount: Nat,
+    pub fee: Nat,
+    pub to_address: String,
+    pub desc: String,
+    pub ts: u64,
+}
+
+impl Request for ClaimsArgs {
+    fn method(&self) -> &'static str {
+        "claims"
+    }
+
+    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
+        candid::encode_one(&self.principal_id)
+    }
+
+    type Response = Result<Vec<ClaimsReply>, String>;
+
+    type Ok = Vec<ClaimsReply>;
+
+    fn transaction_witness(
+        &self,
+        _canister_id: candid::Principal,
+        response: Self::Response,
+    ) -> Result<(TransactionWitness, Self::Ok), String> {
+        let replies = response?;
+
+        let witness = TransactionWitness::NonLedger(serialize_reply(&replies));
+
+        Ok((witness, replies))
+    }
+}
+// ----------------- end:claims -----------------
+
+// ----------------- begin:claim -----------------
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimArgs {
+    pub claim_id: u64,
+}
+
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+pub struct ClaimReply {
+    pub claim_id: u64,
+    pub status: String,
+    pub chain: String,
+    pub symbol: String,
+    pub canister_id: Option<String>,
+    pub amount: Nat,
+    pub fee: Nat,
+    pub to_address: String,
+    pub desc: String,
+    pub transfer_ids: Vec<TransferIdReply>,
+    pub ts: u64,
+}
+
+impl Request for ClaimArgs {
+    fn method(&self) -> &'static str {
+        "claim"
+    }
+
+    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
+        candid::encode_one(&self.claim_id)
+    }
+
+    type Response = Result<ClaimReply, String>;
+
+    type Ok = ClaimReply;
+
+    fn transaction_witness(
+        &self,
+        _canister_id: candid::Principal,
+        response: Self::Response,
+    ) -> Result<(TransactionWitness, Self::Ok), String> {
+        let reply = response?;
+
+        if reply.status != "Success" {
+            return Err(format!("Failed to claim: {}", serialize_reply(&reply)));
+        }
+
+        let transfers = reply.transfer_ids.iter().map(Transfer::from).collect();
+
+        let witness = TransactionWitness::Ledger(transfers);
+
+        Ok((witness, reply))
+    }
+}
+// ----------------- end:claim -----------------

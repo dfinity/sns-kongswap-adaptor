@@ -1,8 +1,9 @@
-use crate::ICP_LEDGER_CANISTER_ID;
-use candid::{Nat, Principal};
+use crate::{log, log_err, ICP_LEDGER_CANISTER_ID};
+use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
 use maplit::btreemap;
+use serde::Deserialize;
 use sns_treasury_manager::{
     self, Accounts, Allowance, Asset, Balance, Balances, DepositRequest, TreasuryManagerInit,
     WithdrawRequest,
@@ -202,7 +203,7 @@ impl TryFrom<TreasuryManagerInit> for ValidatedTreasuryManagerInit {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ValidatedAsset {
     Token {
         symbol: ValidatedSymbol,
@@ -337,10 +338,10 @@ fn take_bytes(input: &str) -> [u8; MAX_SYMBOL_BYTES] {
 }
 
 fn is_valid_symbol_character(b: &u8) -> bool {
-    *b == 0 || b.is_ascii() && b.is_ascii_graphic()
+    *b == 0 || b.is_ascii_graphic()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ValidatedSymbol {
     /// An Ascii string of up to MAX_SYMBOL_BYTES, e.g., "CHAT" or "ICP".
     /// Stored as a fixed-size byte array, so the whole `Asset` type can derive `Copy`.
@@ -526,7 +527,7 @@ impl From<ValidatedAllowance> for Allowance {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ValidatedBalances {
     pub timestamp_ns: u64,
 
@@ -541,7 +542,6 @@ pub(crate) struct ValidatedBalances {
 
 impl ValidatedBalances {
     pub fn new(
-        timestamp_ns: u64,
         asset_0: ValidatedAsset,
         asset_1: ValidatedAsset,
         balance_0_decimals: u64,
@@ -550,13 +550,30 @@ impl ValidatedBalances {
         owner_account_1: Account,
     ) -> Self {
         Self {
+            timestamp_ns: ic_cdk::api::time(),
             asset_0,
             asset_1,
             balance_0_decimals,
             balance_1_decimals,
             owner_account_0,
             owner_account_1,
-            timestamp_ns,
+        }
+    }
+
+    pub fn new_with_zero_balances(
+        asset_0: ValidatedAsset,
+        asset_1: ValidatedAsset,
+        owner_account_0: Account,
+        owner_account_1: Account,
+    ) -> Self {
+        Self {
+            timestamp_ns: ic_cdk::api::time(),
+            balance_0_decimals: 0,
+            balance_1_decimals: 0,
+            asset_0,
+            asset_1,
+            owner_account_0,
+            owner_account_1,
         }
     }
 
@@ -564,6 +581,46 @@ impl ValidatedBalances {
         self.balance_0_decimals = balance_0_decimals;
         self.balance_1_decimals = balance_1_decimals;
         self.timestamp_ns = timestamp_ns;
+    }
+
+    /// Refreshes the asset with the given `asset_id` (0 or 1) with a new asset.
+    ///
+    /// Returns whether the asset was changed.
+    pub fn refresh_asset(&mut self, asset_id: usize, new_asset: ValidatedAsset) {
+        let asset = if asset_id == 0 {
+            &mut self.asset_0
+        } else if asset_id == 1 {
+            &mut self.asset_1
+        } else {
+            log_err(&format!("Invalid asset_id {}: must be 0 or 1.", asset_id));
+            return;
+        };
+
+        let old_asset = asset.clone();
+
+        let ValidatedAsset::Token {
+            symbol: new_symbol,
+            ledger_fee_decimals: new_ledger_fee_decimals,
+            ledger_canister_id: _,
+        } = new_asset;
+
+        if asset.set_symbol(new_symbol) {
+            log(&format!(
+                "Changed asset_{} symbol from `{}` to `{}`.",
+                asset_id,
+                old_asset.symbol(),
+                new_symbol,
+            ));
+        }
+
+        if asset.set_ledger_fee_decimals(new_ledger_fee_decimals) {
+            log(&format!(
+                "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
+                asset_id,
+                old_asset.ledger_fee_decimals(),
+                new_ledger_fee_decimals,
+            ));
+        }
     }
 }
 

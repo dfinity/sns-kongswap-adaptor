@@ -1,20 +1,19 @@
 use crate::{
-    accounting::{self, Party},
-    agent::AbstractAgent,
-    emit_transaction::emit_transaction,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
+        AddPoolArgs, AddPoolReply,
     },
     validation::{saturating_sub, ValidatedAllowance, ValidatedBalances},
-    KongSwapAdaptor,
+    KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
+use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 /// How many ledger transaction that incur fees are required for a deposit operation (per token).
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
-pub const DEPOSIT_LEDGER_FEES_PER_TOKEN: u64 = 2;
+const DEPOSIT_LEDGER_FEES_PER_TOKEN: u64 = 2;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn deposit_into_dex(
@@ -29,8 +28,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             let new_ledger_0 = allowance_0.asset.ledger_canister_id();
             let new_ledger_1 = allowance_1.asset.ledger_canister_id();
 
-            let old_asset_0 = self.balances.asset_0;
-            let old_asset_1 = self.balances.asset_1;
+            let (old_asset_0, old_asset_1) = self.assets();
 
             if new_ledger_0 != old_asset_0.ledger_canister_id()
                 || new_ledger_1 != old_asset_1.ledger_canister_id()
@@ -64,7 +62,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             let request = ApproveArgs {
                 from_subaccount: None,
                 spender: Account {
-                    owner: self.kong_backend_canister_id,
+                    owner: *KONG_BACKEND_CANISTER_ID,
                     subaccount: None,
                 },
 
@@ -79,15 +77,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 fee,
             };
 
-            emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                canister_id,
-                request,
-                operation,
-                human_readable,
-            )
-            .await?;
+            self.emit_transaction(canister_id, request, operation, human_readable)
+                .await?;
         }
 
         let ledger_0 = allowance_0.asset.ledger_canister_id();
@@ -98,13 +89,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         //
         // The call to `validate_allowances` above ensures that the amounts are still
         // sufficiently large.
-        let fee_0 =
-            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_0.asset.ledger_fee_decimals();
-        let amount_0 = saturating_sub(Nat::from(allowance_0.amount_decimals), fee_0.clone());
-
-        let fee_1 =
-            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_1.asset.ledger_fee_decimals();
-        let amount_1 = saturating_sub(Nat::from(allowance_1.amount_decimals), fee_1.clone());
+        let amount_0 = saturating_sub(
+            Nat::from(allowance_0.amount_decimals),
+            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_0.asset.ledger_fee_decimals(),
+        );
+        let amount_1 = saturating_sub(
+            Nat::from(allowance_1.amount_decimals),
+            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_1.asset.ledger_fee_decimals(),
+        );
 
         // Step 2. Ensure the tokens are registered with the DEX.
         // Notes on why we first add SNS and then ICP:
@@ -124,15 +116,57 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let original_amount_1 = amount_1.clone();
 
+        let result = self
+            .emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
+                AddPoolArgs {
+                    token_0: token_0.clone(),
+                    amount_0: amount_0.clone(),
+                    token_1: token_1.clone(),
+                    amount_1,
+
+                    // Liquidity provider fee in basis points 30=0.3%.
+                    lp_fee_bps: Some(30),
+
+                    // Not needed for the ICRC2 flow.
+                    tx_id_0: None,
+                    tx_id_1: None,
+                },
+                TreasuryManagerOperation::Deposit,
+                "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
+            )
+            .await;
+
+        let lp_toke_symbol = self.lp_token();
+
         let tolerated_errors = [
-            format!("LP token {} already exists", self.lp_token()),
-            format!("Pool {} already exists", self.lp_token()),
+            format!("LP token {} already exists", lp_toke_symbol),
+            format!("Pool {} already exists", lp_toke_symbol),
         ];
 
-        match self.try_add_pool(&allowance_0, &allowance_1).await {
-            Ok(balances) => {
-                return Ok(balances);
+        match result {
+            // All used up, since the pool is brand new.
+            Ok(AddPoolReply {
+                symbol_0,
+                address_0,
+                amount_0,
+                symbol_1,
+                amount_1,
+                address_1,
+                ..
+            }) => {
+                return self.reply_params_to_result(
+                    symbol_0,
+                    address_0,
+                    amount_0,
+                    allowance_0.owner_account,
+                    symbol_1,
+                    amount_1,
+                    address_1,
+                    allowance_1.owner_account,
+                );
             }
+
             // An already-existing pool does not preclude a top-up  =>  Keep going.
             Err(TransactionError::Backend(err)) if tolerated_errors.contains(&err) => (),
 
@@ -143,6 +177,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // This is a top-up operation for a pre-existing pool.
         // A top-up requires computing amount_1 as a function of amount_0.
+
         let AddLiquidityAmountsReply { amount_1, .. } = {
             let human_readable = format!(
                 "Calling KongSwapBackend.add_liquidity_amounts to estimate how much liquidity can \
@@ -156,10 +191,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 token_1: token_1.clone(),
             };
 
-            emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                self.kong_backend_canister_id,
+            self.emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
                 request,
                 operation,
                 human_readable,
@@ -185,10 +218,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 tx_id_1: None,
             };
 
-            emit_transaction(
-                &mut self.audit_trail,
-                &self.agent,
-                self.kong_backend_canister_id,
+            self.emit_transaction(
+                *KONG_BACKEND_CANISTER_ID,
                 request,
                 operation,
                 human_readable,
@@ -206,7 +237,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             ..
         } = reply;
 
-        // @todo
         if original_amount_1 < amount_1 {
             return Err(TransactionError::Backend(format!(
                 "Got top-up amount_1 = {} (must be at least {})",
@@ -214,26 +244,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )));
         }
 
-        // ------ Book keeping ------
-        let entries_0 = accounting::create_ledger_entries(
-            Party::Sns,
-            Party::External,
-            amount_0.clone(),
-            fee_0.clone(),
-        )?;
-        self.accounting
-            .post_asset_transaction(&allowance_0.asset, &entries_0);
-
-        let entries_1 = accounting::create_ledger_entries(
-            Party::Sns,
-            Party::External,
-            amount_1.clone(),
-            fee_1.clone(),
-        )?;
-        self.accounting
-            .post_asset_transaction(&allowance_1.asset, &entries_1);
-
-        // -------------------------
         self.reply_params_to_result(
             symbol_0,
             address_0,
@@ -255,7 +265,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let returned_amounts_result = self
             .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::Withdraw,
+                TreasuryManagerOperation::Deposit,
                 allowance_0.owner_account,
                 allowance_1.owner_account,
             )

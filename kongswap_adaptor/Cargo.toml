@@ -4,6 +4,10 @@ version.workspace = true
 authors.workspace = true
 edition.workspace = true
 
+[lib]
+name = "kongswap_adaptor"
+path = "src/lib.rs"
+
 [[bin]]
 name = "kongswap-adaptor-canister"
 path = "src/canister.rs"
@@ -26,6 +30,7 @@ itertools = "0.14.0"
 thiserror = "2.0.12"
 ic-canister-log = "0.2.0"
 icrc-ledger-types.workspace = true
+serde_json = "1.0.140"
 
 [dev-dependencies]
 pocket-ic = { workspace = true }

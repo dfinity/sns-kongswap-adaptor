@@ -3,7 +3,8 @@
 ## Prerequisites
 
 ```
-sudo apt-get install liblmdb-dev clang
+sudo apt-get install liblmdb-dev clang python3
+cargo install ic-wasm
 ```
 
 ### Dependencies
@@ -20,18 +21,7 @@ cd sns-kongswap-adaptor
 Release version:
 
 ```
-cargo build \
-    --target wasm32-unknown-unknown \
-    --release \
-    --bin kongswap-adaptor-canister
-```
-
-Test version:
-
-```
-cargo build \
-    --target wasm32-unknown-unknown \
-    --bin kongswap-adaptor-canister
+./scripts/build.py
 ```
 
 # Testing
@@ -39,10 +29,6 @@ cargo build \
 Assuming the required repositories were cloned into `$HOME`:
 
 ```
-export KONGSWAP_ADAPTOR_CANISTER_WASM_PATH="$HOME/sns-kongswap-adaptor/target/wasm32-unknown-unknown/release/kongswap-adaptor-canister.wasm"
-export IC_ICRC1_LEDGER_WASM_PATH="$HOME/ic/ledger_canister.wasm.gz"
-export KONG_BACKEND_CANISTER_WASM_PATH="$HOME/ic/rs/nervous_system/integration_tests/kong_backend.wasm"
-export MAINNET_ICP_LEDGER_CANISTER_WASM_PATH="$HOME/ic/artifacts/canisters/ledger-canister.wasm.gz"
-clear && cargo test
+./scripts/test.py
 ```
 
