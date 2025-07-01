@@ -1,4 +1,5 @@
 use crate::{
+    accounting::MultiAssetAccounting,
     log_err,
     state::storage::ConfigState,
     validation::{ValidatedAsset, ValidatedBalances},
@@ -31,13 +32,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     /// This is safe to call only after the canister has been initialized.
-    pub fn get_cached_balances(&self) -> ValidatedBalances {
-        self.balances.with_borrow(|balances| {
-            let ConfigState::Initialized(balances) = balances.get() else {
-                ic_cdk::trap("BUG: Balances should be initialized");
-            };
-            *balances
-        })
+    pub fn get_cached_balances(&self) -> MultiAssetAccounting {
+        todo!()
+        // self.balances.with_borrow(|balances| {
+        //     let ConfigState::Initialized(balances) = balances.get() else {
+        //         ic_cdk::trap("BUG: Balances should be initialized");
+        //     };
+        //     *balances
+        // })
     }
 
     pub fn initialize(&self, init_balances: ValidatedBalances) {

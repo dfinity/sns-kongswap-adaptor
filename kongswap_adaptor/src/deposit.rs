@@ -237,6 +237,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             ..
         } = reply;
 
+        // @todo
         if original_amount_1 < amount_1 {
             return Err(TransactionError::Backend(format!(
                 "Got top-up amount_1 = {} (must be at least {})",
