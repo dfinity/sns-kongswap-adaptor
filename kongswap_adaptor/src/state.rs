@@ -13,6 +13,7 @@ pub(crate) mod storage;
 
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
     pub agent: A,
+    pub id: Principal,
     pub balances: &'static LocalKey<RefCell<StableBalances>>,
     pub audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
 }
@@ -20,11 +21,13 @@ pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn new(
         agent: A,
+        id: Principal,
         balances: &'static LocalKey<RefCell<StableBalances>>,
         audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
     ) -> Self {
         KongSwapAdaptor {
             agent,
+            id,
             balances,
             audit_trail,
         }
