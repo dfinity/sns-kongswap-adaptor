@@ -1,5 +1,5 @@
 type TreasuryManagerResult = variant {
-  Ok : Balances;
+  Ok : TimestampedBalances;
   Err : vec TransactionError;
 };
 
@@ -10,9 +10,20 @@ type TransactionError = variant {
   Backend : text;
 };
 
+type Party = variant {
+  Owner;
+  LPExtension;
+  External;
+  LedgerFee;
+};
+
 type Balances = record {
+  party_to_balances : vec record { Party; nat64 }
+}
+
+type TimestampedBalances = record {
   timestamp_ns : nat64;
-  balances : vec record { Asset; Balance };
+  balances : vec record { Asset; Balances };
 };
 
 type Balance = record {
