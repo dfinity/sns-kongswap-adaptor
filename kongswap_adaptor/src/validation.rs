@@ -5,8 +5,8 @@ use itertools::{Either, Itertools};
 use maplit::btreemap;
 use serde::Deserialize;
 use sns_treasury_manager::{
-    self, Accounts, Allowance, Asset, Balance, Balances, DepositRequest, TreasuryManagerInit,
-    WithdrawRequest,
+    self, Accounts, Allowance, Asset, Balance, Balances, BalancesForAsset, DepositRequest, Party,
+    TreasuryManagerInit, WithdrawRequest,
 };
 use std::str::FromStr;
 
@@ -639,20 +639,30 @@ impl From<ValidatedBalances> for Balances {
         let token_0 = Asset::from(asset_0);
         let token_1 = Asset::from(asset_1);
 
-        let balances = btreemap! {
-            token_0 => Balance {
-                amount_decimals: Nat::from(balance_0_decimals),
-                owner_account: icrc1_account_into_account(&owner_account_0),
-            },
-            token_1 => Balance {
-                amount_decimals: Nat::from(balance_1_decimals),
-                owner_account: icrc1_account_into_account(&owner_account_1),
-            },
-        };
-
         Balances {
-            balances,
             timestamp_ns,
+            asset_to_balances: Some(btreemap! {
+                token_0 => BalancesForAsset{
+                    party_to_balance: Some(
+                        btreemap! {
+                            Party::TreasuryManager => Balance {
+                                amount_decimals: Nat::from(balance_0_decimals),
+                                account: Some(icrc1_account_into_account(&owner_account_0)),
+                            },
+                        },
+                    )
+                },
+                token_1 => BalancesForAsset{
+                    party_to_balance: Some(
+                        btreemap! {
+                            Party::TreasuryManager => Balance {
+                                amount_decimals: Nat::from(balance_1_decimals),
+                                account: Some(icrc1_account_into_account(&owner_account_1)),
+                            },
+                        },
+                    )
+                }
+            }),
         }
     }
 }
@@ -662,16 +672,30 @@ impl TryFrom<Balances> for ValidatedBalances {
 
     fn try_from(value: Balances) -> Result<Self, Self::Error> {
         let Balances {
-            balances,
+            asset_to_balances,
             timestamp_ns,
         } = value;
 
-        if balances.len() != 2 {
+        let asset_to_balances = asset_to_balances.unwrap_or_default();
+
+        if asset_to_balances.len() != 2 {
             return Err(format!(
                 "Expected exactly two balances, got {}.",
-                balances.len()
+                asset_to_balances.len()
             ));
         }
+
+        // let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
+        let balances = asset_to_balances
+            .iter()
+            .flat_map(|(asset, BalancesForAsset { party_to_balance })| {
+                party_to_balance
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|(_, balance)| (asset.clone(), balance))
+            })
+            .collect::<Vec<_>>();
 
         let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
             balances.iter().partition_map(
@@ -679,10 +703,14 @@ impl TryFrom<Balances> for ValidatedBalances {
                     _,
                     Balance {
                         amount_decimals,
-                        owner_account,
+                        account,
                     },
                 )| {
-                    let owner_account = account_into_icrc1_account(owner_account);
+                    let owner_account = if let Some(account) = account {
+                        account_into_icrc1_account(account)
+                    } else {
+                        return Either::Right("Balance account is missing.".to_string());
+                    };
                     match decode_nat_to_u64(amount_decimals.clone()) {
                         Ok(amount_decimals) => Either::Left((amount_decimals, owner_account)),
                         Err(err) => Either::Right(err),

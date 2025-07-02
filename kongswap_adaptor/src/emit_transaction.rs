@@ -16,7 +16,7 @@ async fn emit_transaction<R>(
     self_canister_id: Principal,
     canister_id: Principal,
     request: R,
-    treasury_manager_operation: TreasuryManagerOperation,
+    operation: TreasuryManagerOperation,
     human_readable: String,
 ) -> Result<R::Ok, TransactionError>
 where
@@ -50,7 +50,7 @@ where
         canister_id,
         result,
         human_readable,
-        treasury_manager_operation,
+        operation,
     };
 
     audit_trail.with_borrow_mut(|audit_trail| {
@@ -78,9 +78,9 @@ where
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub(crate) async fn emit_transaction<R>(
         &mut self,
+        operation: TreasuryManagerOperation,
         canister_id: Principal,
         request: R,
-        treasury_manager_operation: TreasuryManagerOperation,
         human_readable: String,
     ) -> Result<R::Ok, TransactionError>
     where
@@ -92,7 +92,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             self.id,
             canister_id,
             request,
-            treasury_manager_operation,
+            operation,
             human_readable,
         )
         .await

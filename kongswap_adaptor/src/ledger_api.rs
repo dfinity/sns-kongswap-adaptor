@@ -7,13 +7,13 @@ use icrc_ledger_types::icrc1::{
     account::Account,
     transfer::{Memo, TransferArg},
 };
-use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
+use sns_treasury_manager::TransactionError;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn get_ledger_balance_decimals(
         &mut self,
-        operation: TreasuryManagerOperation,
+        context: &mut OperationContext,
         asset: ValidatedAsset,
     ) -> Result<u64, TransactionError> {
         let ledger_canister_id = asset.ledger_canister_id();
@@ -30,7 +30,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         );
 
         let balance_decimals = self
-            .emit_transaction(ledger_canister_id, request, operation, human_readable)
+            .emit_transaction(
+                context.next_operation(),
+                ledger_canister_id,
+                request,
+                human_readable,
+            )
             .await?;
 
         let balance_decimals =
@@ -41,14 +46,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     async fn get_ledger_balances(
         &mut self,
-        operation: TreasuryManagerOperation,
+        context: &mut OperationContext,
     ) -> Result<(u64, u64), Vec<TransactionError>> {
         let (asset_0, asset_1) = self.assets();
 
         // TODO: These calls could be parallelized.
-        let balance_0_decimals = self.get_ledger_balance_decimals(operation, asset_0).await;
+        let balance_0_decimals = self.get_ledger_balance_decimals(context, asset_0).await;
 
-        let balance_1_decimals = self.get_ledger_balance_decimals(operation, asset_1).await;
+        let balance_1_decimals = self.get_ledger_balance_decimals(context, asset_1).await;
 
         match (balance_0_decimals, balance_1_decimals) {
             (Ok(balance_0), Ok(balance_1)) => Ok((balance_0, balance_1)),
@@ -59,7 +64,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub(crate) async fn return_remaining_assets_to_owner(
         &mut self,
-        operation: TreasuryManagerOperation,
+        context: &mut OperationContext,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
     ) -> Result<ValidatedBalances, Vec<TransactionError>> {
@@ -69,7 +74,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let (return_amount_0_decimals, return_amount_1_decimals) = {
             let (balance_0_decimals, balance_1_decimals) =
-                self.get_ledger_balances(operation).await?;
+                self.get_ledger_balances(context).await?;
 
             let return_amount_0_decimals =
                 balance_0_decimals.saturating_sub(asset_0.ledger_fee_decimals());
@@ -82,10 +87,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let mut withdraw_errors = vec![];
 
-        for (asset, amount_decimals, withdraw_account) in [
+        let mut iter = [
             (asset_0, return_amount_0_decimals, withdraw_account_0),
             (asset_1, return_amount_1_decimals, withdraw_account_1),
-        ] {
+        ]
+        .into_iter()
+        .peekable();
+
+        while let Some((asset, amount_decimals, withdraw_account)) = iter.next() {
             if amount_decimals == 0 {
                 continue;
             }
@@ -100,6 +109,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 withdraw_account,
             );
 
+            let operation = context.next_operation();
+
             let request = TransferArg {
                 from_subaccount: None,
                 to: withdraw_account,
@@ -110,7 +121,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             };
 
             let result = self
-                .emit_transaction(ledger_canister_id, request, operation, human_readable)
+                .emit_transaction(operation, ledger_canister_id, request, human_readable)
                 .await;
 
             if let Err(err) = result {

@@ -5,19 +5,25 @@ use crate::{
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
-use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent};
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use kongswap_adaptor::{
+    agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent},
+    audit::OperationContext,
+};
+use sns_treasury_manager::{Operation, TransactionError};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
     pub async fn refresh_ledger_metadata(
         &mut self,
-        operation: TreasuryManagerOperation,
+        context: &mut OperationContext,
     ) -> Result<(), TransactionError> {
         let (asset_0, asset_1) = self.assets();
 
         // TODO: All calls in this loop could be started in parallel, and then `join_all`d.
-        for (asset_id, mut asset) in [asset_0, asset_1].into_iter().enumerate() {
+
+        let mut iter = [asset_0, asset_1].into_iter().enumerate().peekable();
+
+        while let Some((asset_id, mut asset)) = iter.next() {
             let ledger_canister_id = asset.ledger_canister_id();
             let old_asset = asset.clone();
 
@@ -32,9 +38,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
                 let result = self
                     .emit_transaction(
+                        context.next_operation(),
                         *KONG_BACKEND_CANISTER_ID,
                         UpdateTokenArgs { token },
-                        operation,
                         human_readable,
                     )
                     .await;
@@ -55,9 +61,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
             let reply = self
                 .emit_transaction(
+                    context.next_operation(),
                     ledger_canister_id,
                     Icrc1MetadataRequest {},
-                    operation,
                     human_readable,
                 )
                 .await?;
@@ -129,13 +135,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
-        let operation = TreasuryManagerOperation::Balances;
+        let mut context = OperationContext::new(Operation::Balances);
 
-        if let Err(err) = self.refresh_ledger_metadata(operation).await {
+        if let Err(err) = self.refresh_ledger_metadata(&mut context).await {
             log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
         }
 
-        let remove_lp_token_amount = self.lp_balance(operation).await?;
+        let remove_lp_token_amount = self.lp_balance(&mut context).await?;
 
         let human_readable = format!(
             "Calling KongSwapBackend.remove_liquidity_amounts to estimate how much liquidity can be removed for LP token amount {}.",
@@ -152,9 +158,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let reply = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await?;

@@ -139,6 +139,9 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
             .try_into()
             .map_err(|err| vec![TransactionError::Precondition(err)])?;
 
+        self.validate_deposit_args(allowance_0, allowance_1)
+            .map_err(|err| vec![err])?;
+
         let deposited_amounts = self
             .deposit_impl(allowance_0, allowance_1)
             .await

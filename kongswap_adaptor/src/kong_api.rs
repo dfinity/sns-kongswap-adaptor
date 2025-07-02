@@ -9,8 +9,8 @@ use crate::{
 use candid::{Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
-use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
+use sns_treasury_manager::TransactionError;
 use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -21,8 +21,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn maybe_add_token(
         &mut self,
+        context: &mut OperationContext,
         ledger_canister_id: Principal,
-        operation: TreasuryManagerOperation,
     ) -> Result<(), TransactionError> {
         let token = format!("IC.{}", ledger_canister_id);
 
@@ -37,9 +37,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let response = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await;
@@ -57,7 +57,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn lp_balance(
         &mut self,
-        operation: TreasuryManagerOperation,
+        context: &mut OperationContext,
     ) -> Result<Nat, TransactionError> {
         let request = UserBalancesArgs {
             principal_id: self.id.to_string(),
@@ -68,9 +68,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let replies = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await?;

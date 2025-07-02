@@ -1,6 +1,38 @@
-use sns_treasury_manager::AuditTrail;
+use sns_treasury_manager::{AuditTrail, Operation, Step, TreasuryManagerOperation};
 
 pub const MAX_REPLY_SIZE_BYTES: usize = 1_024;
+
+#[must_use]
+pub struct OperationContext {
+    operation: Operation,
+
+    /// None indicates that there were no calls yet.
+    index: Option<usize>,
+}
+
+impl OperationContext {
+    pub fn new(operation: Operation) -> Self {
+        Self {
+            operation,
+            index: None,
+        }
+    }
+
+    /// Should be used for operations that are definitely not the final operation
+    /// of the current operation.
+    pub fn next_operation(&mut self) -> TreasuryManagerOperation {
+        let operation = self.operation;
+
+        let index = self.index.unwrap_or_default();
+        self.index = Some(index.saturating_add(1));
+
+        let step = Step {
+            index,
+            is_final: false,
+        };
+        TreasuryManagerOperation { operation, step }
+    }
+}
 
 pub fn serialize_audit_trail(audit_trail: &AuditTrail) -> Result<String, String> {
     serde_json::to_string(&audit_trail.transactions).map_err(|err| format!("{err:?}"))

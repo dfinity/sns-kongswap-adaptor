@@ -5,13 +5,15 @@ use crate::{
 };
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use kongswap_adaptor::audit::OperationContext;
+use sns_treasury_manager::{Operation, TransactionError};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
-    async fn withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
-        let operation = TreasuryManagerOperation::Withdraw;
-
-        let remove_lp_token_amount = self.lp_balance(operation).await.map_err(|err| vec![err])?;
+    async fn withdraw_from_dex(
+        &mut self,
+        context: &mut OperationContext,
+    ) -> Result<(), Vec<TransactionError>> {
+        let remove_lp_token_amount = self.lp_balance(context).await.map_err(|err| vec![err])?;
 
         let human_readable =
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."
@@ -27,9 +29,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let RemoveLiquidityReply { claim_ids, .. } = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await
@@ -50,29 +52,32 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
-    pub async fn retry_withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
-        let operation = TreasuryManagerOperation::Withdraw;
-
+    pub async fn retry_withdraw_from_dex(
+        &mut self,
+        context: &mut OperationContext,
+    ) -> Result<(), Vec<TransactionError>> {
         let human_readable =
             "Calling KongSwapBackend.claims to check if a retry withdrawal is needed.".to_string();
 
-        let claims = self
+        let mut claims = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 ClaimsArgs {
                     principal_id: self.id.to_string(),
                 },
-                operation,
                 human_readable,
             )
             .await
-            .map_err(|err| vec![err])?;
+            .map_err(|err| vec![err])?
+            .into_iter()
+            .peekable();
 
         let mut errors = vec![];
 
-        for ClaimsReply {
+        while let Some(ClaimsReply {
             claim_id, symbol, ..
-        } in claims
+        }) = claims.next()
         {
             let human_readable = format!(
                 "Calling KongSwapBackend.claim to claim the liquidity for {}, claim ID {}.",
@@ -81,9 +86,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
             let response = self
                 .emit_transaction(
+                    context.next_operation(),
                     *KONG_BACKEND_CANISTER_ID,
                     ClaimArgs { claim_id },
-                    operation,
                     human_readable,
                 )
                 .await;
@@ -105,22 +110,20 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         withdraw_account_0: Account,
         withdraw_account_1: Account,
     ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+        let mut context = OperationContext::new(Operation::Withdraw);
+
         let mut errors = vec![];
 
-        if let Err(err) = self.withdraw_from_dex().await {
+        if let Err(err) = self.withdraw_from_dex(&mut context).await {
             errors.extend(err.into_iter());
         }
 
-        if let Err(err) = self.retry_withdraw_from_dex().await {
+        if let Err(err) = self.retry_withdraw_from_dex(&mut context).await {
             errors.extend(err.into_iter());
         }
 
         let returned_amounts = match self
-            .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::Withdraw,
-                withdraw_account_0,
-                withdraw_account_1,
-            )
+            .return_remaining_assets_to_owner(&mut context, withdraw_account_0, withdraw_account_1)
             .await
         {
             Ok(amounts) => Some(amounts),
