@@ -63,7 +63,7 @@ where
     });
 
     // Self-call to ensure that the state has been committed, to prevent state roll back in case
-    // of a panic that occurs before the next (meaningfuk) async operation. This is recommended:
+    // of a panic that occurs before the next (meaningful) async operation. This is recommended:
     // https://internetcomputer.org/docs/building-apps/security/inter-canister-calls#journaling
     if let Err(err) = agent.call(self_canister_id, CommitStateRequest {}).await {
         log_err(&format!(
