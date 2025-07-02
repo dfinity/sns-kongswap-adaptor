@@ -1,13 +1,11 @@
 use crate::{
     log_err,
     state::{storage::StableTransaction, KongSwapAdaptor},
-    StableAuditTrail,
 };
 use candid::Principal;
 use kongswap_adaptor::agent::{AbstractAgent, Request};
 use kongswap_adaptor::requests::CommitStateRequest;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
-use std::{cell::RefCell, thread::LocalKey};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Performs the request call and records the transaction in the audit trail.
