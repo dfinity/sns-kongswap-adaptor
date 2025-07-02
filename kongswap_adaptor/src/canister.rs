@@ -147,6 +147,8 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
             .await
             .map(Balances::from)?;
 
+        self.finalize_audit_trail_transaction();
+
         Ok(deposited_amounts)
     }
 

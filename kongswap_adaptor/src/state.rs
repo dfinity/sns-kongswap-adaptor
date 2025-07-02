@@ -1,6 +1,6 @@
 use crate::{
     log_err,
-    state::storage::ConfigState,
+    state::storage::{ConfigState, StableTransaction},
     validation::{ValidatedAsset, ValidatedBalances},
     StableAuditTrail, StableBalances,
 };
@@ -76,6 +76,38 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 log_err(&format!("Failed to update balances: {:?}", err));
             }
         })
+    }
+
+    fn with_audit_trail_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StableAuditTrail) -> R,
+    {
+        self.audit_trail
+            .with_borrow_mut(|audit_trail| f(audit_trail))
+    }
+
+    pub fn push_audit_trail_transaction(&self, transaction: StableTransaction) {
+        self.with_audit_trail_mut(|audit_trail| {
+            if let Err(err) = audit_trail.push(&transaction) {
+                log_err(&format!(
+                    "Cannot push transaction to audit trail: {}\ntransaction: {:?}",
+                    err, transaction
+                ));
+            }
+        });
+    }
+
+    pub fn finalize_audit_trail_transaction(&self) {
+        let last_entry = self.with_audit_trail_mut(|audit_trail| audit_trail.pop());
+
+        let Some(mut last_entry) = last_entry else {
+            log_err("Audit trail is empty despite the operation beign successfully completed.");
+            return;
+        };
+
+        last_entry.operation.step.is_final = true;
+
+        self.push_audit_trail_transaction(last_entry);
     }
 
     pub fn assets(&self) -> (ValidatedAsset, ValidatedAsset) {
