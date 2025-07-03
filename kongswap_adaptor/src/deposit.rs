@@ -1,9 +1,10 @@
 use crate::{
+    accounting::ValidatedBalances,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply,
     },
-    validation::{saturating_sub, ValidatedAllowance, ValidatedMultiAssetAccounting},
+    validation::{saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
@@ -20,7 +21,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedMultiAssetAccounting, TransactionError> {
+    ) -> Result<ValidatedBalances, TransactionError> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit);
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
@@ -261,7 +262,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedMultiAssetAccounting, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
         let deposit_into_dex_result = self.deposit_into_dex(allowance_0, allowance_1).await;
 
         let returned_amounts_result = self

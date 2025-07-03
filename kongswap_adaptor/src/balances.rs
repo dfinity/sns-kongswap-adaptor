@@ -1,5 +1,5 @@
 use crate::{
-    accounting::MultiAssetAccounting,
+    accounting::ValidatedBalances,
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log_err,
     validation::{decode_nat_to_u64, ValidatedSymbol},
@@ -129,9 +129,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
-    pub async fn refresh_balances_impl(
-        &mut self,
-    ) -> Result<MultiAssetAccounting, TransactionError> {
+    pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
 
         if let Err(err) = self.refresh_ledger_metadata(operation).await {

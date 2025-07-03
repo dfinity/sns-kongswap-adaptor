@@ -1,11 +1,9 @@
-use crate::{state::KongSwapAdaptor, validation::ValidatedMultiAssetAccounting};
+use crate::{accounting::ValidatedBalances, state::KongSwapAdaptor};
 use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
-    pub async fn issue_rewards_impl(
-        &mut self,
-    ) -> Result<ValidatedMultiAssetAccounting, Vec<TransactionError>> {
+    pub async fn issue_rewards_impl(&mut self) -> Result<ValidatedBalances, Vec<TransactionError>> {
         // TODO: Ask DEX to send our rewards back.
 
         let withdraw_accounts = self.owner_accounts();

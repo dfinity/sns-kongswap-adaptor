@@ -1,4 +1,4 @@
-use crate::{accounting::MultiAssetAccounting, validation::ValidatedMultiAssetAccounting};
+use crate::{accounting::ValidatedBalances, validation::ValidatedMultiAssetAccounting};
 use candid::{CandidType, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
 use icrc_ledger_types::icrc1::account::Account;
@@ -16,7 +16,7 @@ pub(crate) enum ConfigState {
     Uninitialized,
 
     /// Includes only `balances` from `KongSwapAdaptor`, since `audit_trail` is stored separately.
-    Initialized(MultiAssetAccounting),
+    Initialized(ValidatedBalances),
 }
 
 impl Storable for ConfigState {

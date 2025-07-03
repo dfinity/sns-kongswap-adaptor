@@ -1,9 +1,10 @@
 use crate::{
+    accounting::ValidatedBalances,
     kong_types::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
-    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedMultiAssetAccounting},
+    validation::{decode_nat_to_u64, ValidatedAsset},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::{Nat, Principal};
@@ -121,7 +122,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         amount_1: Nat,
         address_1: String,
         owner_account_1: Account,
-    ) -> Result<ValidatedMultiAssetAccounting, TransactionError> {
+    ) -> Result<ValidatedBalances, TransactionError> {
         let fees = self.fees();
 
         let asset_0 = ValidatedAsset::try_from((symbol_0, address_0, fees[0]))

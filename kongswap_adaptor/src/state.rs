@@ -1,8 +1,8 @@
 use crate::{
-    accounting::MultiAssetAccounting,
+    accounting::{ValidatedBalanceForAsset, ValidatedBalances},
     log_err,
     state::storage::ConfigState,
-    validation::{ValidatedAsset, ValidatedMultiAssetAccounting},
+    validation::ValidatedAsset,
     StableAuditTrail, StableBalances, StableOwnerAccounts,
 };
 use candid::Principal;
@@ -35,7 +35,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     /// This is safe to call only after the canister has been initialized.
-    pub fn get_cached_balances(&self) -> MultiAssetAccounting {
+    pub fn get_cached_balances(&self) -> ValidatedBalances {
         self.balances.with_borrow(|balances| {
             let ConfigState::Initialized(balances) = balances.get() else {
                 ic_cdk::trap("BUG: Balances should be initialized");
@@ -44,7 +44,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         })
     }
 
-    pub fn initialize(&self, init_balances: ValidatedMultiAssetAccounting) {
+    pub fn initialize(&self, assets: Vec<ValidatedAsset>, owner_accounts: Vec<Account>) {
         self.balances.with_borrow_mut(|cell| {
             if let ConfigState::Initialized(balances) = cell.get() {
                 log_err(&format!(
@@ -53,10 +53,27 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ));
             }
 
-            let multi_asset_accounting = MultiAssetAccounting::from(init_balances);
+            let validated_balances = ValidatedBalances {
+                timestamp_ns: ic_cdk::api::time(),
+                asset_to_accounting: assets
+                    .iter()
+                    .map(|asset| (asset.clone(), ValidatedBalanceForAsset::default()))
+                    .collect(),
+            };
 
-            if let Err(err) = cell.set(ConfigState::Initialized(multi_asset_accounting)) {
+            if let Err(err) = cell.set(ConfigState::Initialized(validated_balances)) {
                 log_err(&format!("Failed to initialize balances: {:?}", err));
+            }
+        });
+
+        self.owner_accounts.with_borrow_mut(|cell| {
+            for owner_account in owner_accounts {
+                if let Err(err) = cell.push(&storage::StableOwnerAccount { owner_account }) {
+                    log_err(&format!(
+                        "Cannot initialise the owner_accounts with {}. Reason: {}",
+                        owner_account, err
+                    ));
+                };
             }
         });
     }
@@ -65,7 +82,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// if the canister has been initialized.
     pub fn with_balances_mut<F>(&self, f: F)
     where
-        F: FnOnce(&mut MultiAssetAccounting),
+        F: FnOnce(&mut ValidatedBalances),
     {
         self.balances.with_borrow_mut(|cell| {
             let ConfigState::Initialized(balances) = cell.get() else {

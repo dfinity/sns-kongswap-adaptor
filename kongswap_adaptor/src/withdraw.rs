@@ -1,6 +1,6 @@
 use crate::{
+    accounting::ValidatedBalances,
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
-    validation::ValidatedMultiAssetAccounting,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -104,7 +104,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedMultiAssetAccounting, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
         let mut errors = vec![];
 
         if let Err(err) = self.withdraw_from_dex().await {

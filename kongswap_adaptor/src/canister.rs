@@ -1,4 +1,4 @@
-use crate::accounting::MultiAssetAccounting;
+use crate::accounting::ValidatedBalances;
 use crate::state::storage::{ConfigState, StableOwnerAccount, StableTransaction};
 use crate::validation::{
     ValidatedDepositRequest, ValidatedMultiAssetAccounting, ValidatedTreasuryManagerInit,
@@ -12,10 +12,11 @@ use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableV
 use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
 use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
+use maplit::btreemap;
 use sns_treasury_manager::{
-    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest,
-    Transaction, TransactionError, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
-    WithdrawRequest,
+    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesForAsset, BalancesRequest,
+    DepositRequest, Transaction, TransactionError, TreasuryManager, TreasuryManagerArg,
+    TreasuryManagerResult, WithdrawRequest,
 };
 use state::KongSwapAdaptor;
 use std::{cell::RefCell, time::Duration};
@@ -289,14 +290,10 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .try_into()
         .expect("Failed to validate TreasuryManagerInit.");
 
-    let init_balances = ValidatedMultiAssetAccounting::new_with_zero_balances(
-        allowance_0.asset,
-        allowance_1.asset,
-        allowance_0.owner_account,
-        allowance_1.owner_account,
+    canister_state().initialize(
+        vec![allowance_0.asset, allowance_1.asset],
+        vec![allowance_0.owner_account, allowance_1.owner_account],
     );
-
-    canister_state().initialize(init_balances);
 
     init_periodic_tasks();
 

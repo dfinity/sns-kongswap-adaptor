@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use candid::{CandidType, Nat};
 use serde::Deserialize;
@@ -53,14 +53,12 @@ pub(crate) fn create_ledger_entries(
 }
 
 #[derive(Default, CandidType, Deserialize, Clone)]
-pub(crate) struct SingleAssetAccounting {
-    pub party_to_balance: HashMap<Party, u64>,
-    pub journal: Vec<Vec<LedgerEntry>>,
+pub(crate) struct ValidatedBalanceForAsset {
+    pub party_to_balance: BTreeMap<Party, u64>,
 }
 
-impl SingleAssetAccounting {
+impl ValidatedBalanceForAsset {
     fn post_transaction(&mut self, entries: &Vec<LedgerEntry>) {
-        // Apply entries
         for entry in entries {
             let balance = self
                 .party_to_balance
@@ -72,8 +70,6 @@ impl SingleAssetAccounting {
                 *balance -= entry.amount;
             }
         }
-
-        self.journal.push(entries.clone());
     }
 
     fn get_balance(&self, party: &Party) -> u64 {
@@ -111,16 +107,16 @@ impl SingleAssetAccounting {
 }
 
 #[derive(CandidType, Deserialize, Clone)]
-pub(crate) struct MultiAssetAccounting {
+pub(crate) struct ValidatedBalances {
     pub timestamp_ns: u64,
-    pub asset_to_accounting: HashMap<ValidatedAsset, SingleAssetAccounting>,
+    pub asset_to_accounting: BTreeMap<ValidatedAsset, ValidatedBalanceForAsset>,
 }
 
-impl MultiAssetAccounting {
+impl ValidatedBalances {
     pub fn new(assets: Vec<ValidatedAsset>, timestamp_ns: u64) -> Self {
-        let asset_to_accounting = assets.iter().fold(HashMap::new(), |mut hm, asset| {
-            hm.insert(asset.clone(), SingleAssetAccounting::default());
-            hm
+        let asset_to_accounting = assets.iter().fold(BTreeMap::new(), |mut btm, asset| {
+            btm.insert(asset.clone(), ValidatedBalanceForAsset::default());
+            btm
         });
 
         Self {
@@ -131,7 +127,7 @@ impl MultiAssetAccounting {
 
     fn add_asset(&mut self, asset: ValidatedAsset) {
         self.asset_to_accounting
-            .insert(asset, SingleAssetAccounting::default());
+            .insert(asset, ValidatedBalanceForAsset::default());
     }
 
     pub fn get_balance(&self, asset: &ValidatedAsset, party: &Party) -> Result<u64, String> {
@@ -173,7 +169,7 @@ impl MultiAssetAccounting {
             .entry(*asset)
             .and_modify(|accounting| accounting.stage_investment(amount, party))
             .or_insert({
-                let mut single_asset_accounting = SingleAssetAccounting::default();
+                let mut single_asset_accounting = ValidatedBalanceForAsset::default();
                 single_asset_accounting.stage_investment(amount, party);
                 single_asset_accounting
             });
