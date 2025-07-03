@@ -3,7 +3,7 @@ use crate::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
-    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
+    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedMultiAssetAccounting},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::{Nat, Principal};
@@ -15,8 +15,8 @@ use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn lp_token(&self) -> String {
-        let (asset_0, asset_1) = self.assets();
-        format!("{}_{}", asset_0.symbol(), asset_1.symbol())
+        let assets = self.assets();
+        format!("{}_{}", assets[0].symbol(), assets[1].symbol())
     }
 
     pub async fn maybe_add_token(
@@ -121,13 +121,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         amount_1: Nat,
         address_1: String,
         owner_account_1: Account,
-    ) -> Result<ValidatedBalances, TransactionError> {
-        let (fee_0, fee_1) = self.fees();
+    ) -> Result<ValidatedMultiAssetAccounting, TransactionError> {
+        let fees = self.fees();
 
-        let asset_0 = ValidatedAsset::try_from((symbol_0, address_0, fee_0))
+        let asset_0 = ValidatedAsset::try_from((symbol_0, address_0, fees[0]))
             .map_err(TransactionError::Postcondition)?;
 
-        let asset_1 = ValidatedAsset::try_from((symbol_1, address_1, fee_1))
+        let asset_1 = ValidatedAsset::try_from((symbol_1, address_1, fees[1]))
             .map_err(TransactionError::Postcondition)?;
 
         let balance_0_decimals =
@@ -135,7 +135,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let balance_1_decimals =
             decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
 
-        Ok(ValidatedBalances::new(
+        Ok(ValidatedMultiAssetAccounting::new(
             asset_0,
             asset_1,
             balance_0_decimals,

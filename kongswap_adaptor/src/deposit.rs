@@ -3,7 +3,7 @@ use crate::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply,
     },
-    validation::{saturating_sub, ValidatedAllowance, ValidatedBalances},
+    validation::{saturating_sub, ValidatedAllowance, ValidatedMultiAssetAccounting},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
@@ -20,23 +20,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, TransactionError> {
-        let operation = TreasuryManagerOperation::Deposit;
+    ) -> Result<ValidatedMultiAssetAccounting, TransactionError> {
+        let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit);
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
         {
             let new_ledger_0 = allowance_0.asset.ledger_canister_id();
             let new_ledger_1 = allowance_1.asset.ledger_canister_id();
 
-            let (old_asset_0, old_asset_1) = self.assets();
+            let old_assets = self.assets();
 
-            if new_ledger_0 != old_asset_0.ledger_canister_id()
-                || new_ledger_1 != old_asset_1.ledger_canister_id()
+            if new_ledger_0 != old_assets[0].ledger_canister_id()
+                || new_ledger_1 != old_assets[1].ledger_canister_id()
             {
                 return Err(TransactionError::Precondition(format!(
                     "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
-                    old_asset_0.symbol(),
-                    old_asset_1.symbol(),
+                    old_assets[0].symbol(),
+                    old_assets[1].symbol(),
                     new_ledger_0,
                     new_ledger_1,
                 )));
@@ -132,7 +132,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     tx_id_0: None,
                     tx_id_1: None,
                 },
-                TreasuryManagerOperation::Deposit,
+                TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit),
                 "Calling KongSwapBackend.add_pool to add a new pool.".to_string(),
             )
             .await;
@@ -261,12 +261,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+    ) -> Result<ValidatedMultiAssetAccounting, Vec<TransactionError>> {
         let deposit_into_dex_result = self.deposit_into_dex(allowance_0, allowance_1).await;
 
         let returned_amounts_result = self
             .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::Deposit,
+                TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit),
                 allowance_0.owner_account,
                 allowance_1.owner_account,
             )

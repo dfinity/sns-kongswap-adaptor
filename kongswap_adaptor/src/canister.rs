@@ -1,7 +1,8 @@
-use crate::state::storage::{ConfigState, StableTransaction};
-use crate::validation::ValidatedBalances;
+use crate::accounting::MultiAssetAccounting;
+use crate::state::storage::{ConfigState, StableOwnerAccount, StableTransaction};
 use crate::validation::{
-    ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
+    ValidatedDepositRequest, ValidatedMultiAssetAccounting, ValidatedTreasuryManagerInit,
+    ValidatedWithdrawRequest,
 };
 use candid::Principal;
 use ic_canister_log::{declare_log_buffer, log};
@@ -36,6 +37,7 @@ const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // o
 pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) type StableAuditTrail = StableVec<StableTransaction, Memory>;
 pub(crate) type StableBalances = StableCell<ConfigState, Memory>;
+pub(crate) type StableOwnerAccounts = StableVec<StableOwnerAccount, Memory>;
 
 // Canister ID from the mainnet.
 // See https://dashboard.internetcomputer.org/canister/2ipq2-uqaaa-aaaar-qailq-cai
@@ -48,6 +50,7 @@ lazy_static! {
 
 const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(0);
 const AUDIT_TRAIL_MEMORY_ID: MemoryId = MemoryId::new(1);
+const OWNER_ACCOUNTS_MEMORY_ID: MemoryId = MemoryId::new(2);
 
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
@@ -73,10 +76,20 @@ thread_local! {
                 .expect("AUDIT_TRAIL init should not cause errors")
             )
         );
+
+    static OWNER_ACCOUNTS: RefCell<StableOwnerAccounts> =
+        MEMORY_MANAGER.with(|memory_manager|
+            RefCell::new(
+                StableVec::init(
+                    memory_manager.borrow().get(OWNER_ACCOUNTS_MEMORY_ID)
+                )
+                .expect("OWNER_ACCOUNTS init should not cause errors")
+            )
+        );
 }
 
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
-    KongSwapAdaptor::new(CdkAgent::new(), &BALANCES, &AUDIT_TRAIL)
+    KongSwapAdaptor::new(CdkAgent::new(), &BALANCES, &AUDIT_TRAIL, &OWNER_ACCOUNTS)
 }
 
 fn check_access() {
@@ -107,18 +120,18 @@ fn log(msg: &str) {
 
 impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
-        let (ledger_0, ledger_1) = self.ledgers();
+        let ledgers = self.ledgers();
 
-        let (default_withdraw_account_0, default_withdraw_account_1) = self.owner_accounts();
+        let default_owners = self.owner_accounts();
 
         let ValidatedWithdrawRequest {
             withdraw_account_0,
             withdraw_account_1,
         } = (
-            ledger_0,
-            ledger_1,
-            default_withdraw_account_0,
-            default_withdraw_account_1,
+            ledgers[0],
+            ledgers[1],
+            default_owners[0],
+            default_owners[1],
             request,
         )
             .try_into()
@@ -157,7 +170,8 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     fn balances(&self, _request: BalancesRequest) -> TreasuryManagerResult {
-        Ok(Balances::from(self.get_cached_balances()))
+        todo!()
+        // Ok(Balances::from(self.get_cached_balances()))
     }
 
     async fn refresh_balances(&mut self) {
@@ -275,7 +289,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .try_into()
         .expect("Failed to validate TreasuryManagerInit.");
 
-    let init_balances = ValidatedBalances::new_with_zero_balances(
+    let init_balances = ValidatedMultiAssetAccounting::new_with_zero_balances(
         allowance_0.asset,
         allowance_1.asset,
         allowance_0.owner_account,

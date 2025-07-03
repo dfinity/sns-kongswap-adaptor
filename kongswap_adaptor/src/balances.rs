@@ -1,7 +1,8 @@
 use crate::{
+    accounting::MultiAssetAccounting,
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log_err,
-    validation::{decode_nat_to_u64, ValidatedBalances, ValidatedSymbol},
+    validation::{decode_nat_to_u64, ValidatedSymbol},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
@@ -14,10 +15,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         operation: TreasuryManagerOperation,
     ) -> Result<(), TransactionError> {
-        let (asset_0, asset_1) = self.assets();
+        let assets = self.assets();
 
         // TODO: All calls in this loop could be started in parallel, and then `join_all`d.
-        for (asset_id, mut asset) in [asset_0, asset_1].into_iter().enumerate() {
+        for (asset_id, mut asset) in assets.into_iter().enumerate() {
             let ledger_canister_id = asset.ledger_canister_id();
             let old_asset = asset.clone();
 
@@ -120,16 +121,18 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 }
             }
 
-            self.with_balances_mut(|balances| {
-                balances.refresh_asset(asset_id, asset);
+            self.with_balances_mut(|multi_asset_accounting| {
+                multi_asset_accounting.refresh_asset(asset_id, old_asset, asset);
             });
         }
 
         Ok(())
     }
 
-    pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
-        let operation = TreasuryManagerOperation::Balances;
+    pub async fn refresh_balances_impl(
+        &mut self,
+    ) -> Result<MultiAssetAccounting, TransactionError> {
+        let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
 
         if let Err(err) = self.refresh_ledger_metadata(operation).await {
             log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
@@ -142,11 +145,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             remove_lp_token_amount
         );
 
-        let (asset_0, asset_1) = self.assets();
+        let assets = self.assets();
 
         let request = RemoveLiquidityAmountsArgs {
-            token_0: asset_0.symbol(),
-            token_1: asset_1.symbol(),
+            token_0: assets[0].symbol(),
+            token_1: assets[1].symbol(),
             remove_lp_token_amount,
         };
 
@@ -168,8 +171,18 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let balance_1_decimals =
             decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
 
-        self.with_balances_mut(|balances| {
-            balances.set(balance_0_decimals, balance_1_decimals, ic_cdk::api::time());
+        // Need to fetch balances of the other assets
+        let balances = vec![balance_0_decimals, balance_1_decimals];
+
+        self.with_balances_mut(|multi_asset_accounting| {
+            for (asset, new_balance) in assets.iter().zip(balances.iter()) {
+                multi_asset_accounting.refresh_party_balances(
+                    crate::accounting::Party::External,
+                    asset,
+                    ic_cdk::api::time(),
+                    *new_balance,
+                );
+            }
         });
 
         Ok(self.get_cached_balances())

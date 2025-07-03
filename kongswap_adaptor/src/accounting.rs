@@ -4,11 +4,14 @@ use candid::{CandidType, Nat};
 use serde::Deserialize;
 use sns_treasury_manager::TransactionError;
 
-use crate::validation::{decode_nat_to_u64, ValidatedAsset};
+use crate::{
+    log,
+    validation::{decode_nat_to_u64, ValidatedAsset},
+};
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, CandidType, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug, CandidType, Deserialize, PartialOrd, Ord)]
 pub enum Party {
-    Sns,
+    TreasuryOwner,
     TreasuryManager,
     External,
     LedgerFee,
@@ -49,17 +52,20 @@ pub(crate) fn create_ledger_entries(
     ])
 }
 
-#[derive(Default, CandidType, Deserialize)]
-struct SingleAssetAccounting {
-    balances: HashMap<Party, u64>,
-    journal: Vec<Vec<LedgerEntry>>,
+#[derive(Default, CandidType, Deserialize, Clone)]
+pub(crate) struct SingleAssetAccounting {
+    pub party_to_balance: HashMap<Party, u64>,
+    pub journal: Vec<Vec<LedgerEntry>>,
 }
 
 impl SingleAssetAccounting {
     fn post_transaction(&mut self, entries: &Vec<LedgerEntry>) {
         // Apply entries
         for entry in entries {
-            let balance = self.balances.entry(entry.account.clone()).or_insert(0);
+            let balance = self
+                .party_to_balance
+                .entry(entry.account.clone())
+                .or_insert(0);
             if entry.receives {
                 *balance += entry.amount;
             } else {
@@ -71,18 +77,18 @@ impl SingleAssetAccounting {
     }
 
     fn get_balance(&self, party: &Party) -> u64 {
-        *self.balances.get(party).unwrap_or(&0)
+        *self.party_to_balance.get(party).unwrap_or(&0)
     }
 
     fn stage_investment(&mut self, amount: u64, party: &Party) {
-        self.balances
+        self.party_to_balance
             .entry(party.clone())
             .and_modify(|balance| *balance += amount)
             .or_insert(amount);
     }
 
     fn unstage_investment(&mut self, amount: u64, party: &Party) -> Result<(), String> {
-        match self.balances.get_mut(party) {
+        match self.party_to_balance.get_mut(party) {
             Some(balance) if *balance >= amount => {
                 *balance -= amount;
                 Ok(())
@@ -94,21 +100,31 @@ impl SingleAssetAccounting {
             None => Err(format!("{:?} has no staged investments", party)),
         }
     }
+    fn refresh_party_balances(&mut self, party: Party, new_balance: u64) {
+        if let Some(balance) = self.party_to_balance.get_mut(&party) {
+            *balance = new_balance;
+        } else {
+            log(&format!("{:?} has not been registered", party));
+            return;
+        }
+    }
 }
 
-#[derive(CandidType, Deserialize)]
+#[derive(CandidType, Deserialize, Clone)]
 pub(crate) struct MultiAssetAccounting {
-    asset_to_accounting: HashMap<ValidatedAsset, SingleAssetAccounting>,
+    pub timestamp_ns: u64,
+    pub asset_to_accounting: HashMap<ValidatedAsset, SingleAssetAccounting>,
 }
 
 impl MultiAssetAccounting {
-    pub fn new(assets: Vec<ValidatedAsset>) -> Self {
+    pub fn new(assets: Vec<ValidatedAsset>, timestamp_ns: u64) -> Self {
         let asset_to_accounting = assets.iter().fold(HashMap::new(), |mut hm, asset| {
             hm.insert(asset.clone(), SingleAssetAccounting::default());
             hm
         });
 
         Self {
+            timestamp_ns,
             asset_to_accounting,
         }
     }
@@ -184,5 +200,66 @@ impl MultiAssetAccounting {
         }
 
         Ok(())
+    }
+
+    pub fn refresh_asset(
+        &mut self,
+        asset_id: usize,
+        old_asset: ValidatedAsset,
+        new_asset: ValidatedAsset,
+    ) {
+        if let Some((mut asset, accounting)) = self.asset_to_accounting.remove_entry(&old_asset) {
+            let ValidatedAsset::Token {
+                symbol: new_symbol,
+                ledger_fee_decimals: new_ledger_fee_decimals,
+                ledger_canister_id: _,
+            } = new_asset;
+
+            if asset.set_symbol(new_symbol) {
+                log(&format!(
+                    "Changed asset_{} symbol from `{}` to `{}`.",
+                    asset_id,
+                    old_asset.symbol(),
+                    new_symbol,
+                ));
+            }
+
+            if asset.set_ledger_fee_decimals(new_ledger_fee_decimals) {
+                log(&format!(
+                    "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
+                    asset_id,
+                    old_asset.ledger_fee_decimals(),
+                    new_ledger_fee_decimals,
+                ));
+            }
+
+            self.asset_to_accounting.insert(asset, accounting);
+        } else {
+            log(&format!(
+                "Asset with symbol {} and ledger canister ID {} not found in the accounting",
+                old_asset.symbol(),
+                old_asset.ledger_canister_id()
+            ));
+            return;
+        }
+    }
+
+    pub(crate) fn refresh_party_balances(
+        &mut self,
+        party: Party,
+        asset: &ValidatedAsset,
+        timstamp_ns: u64,
+        new_balance: u64,
+    ) {
+        if let Some(single_asset_accounting) = self.asset_to_accounting.get_mut(asset) {
+            single_asset_accounting.refresh_party_balances(party, new_balance);
+            self.timestamp_ns = timstamp_ns;
+        } else {
+            log(&format!(
+                "Coudln't refresh the balances. Asset {} not found",
+                asset.symbol()
+            ));
+            return;
+        }
     }
 }

@@ -1,6 +1,7 @@
-use crate::{accounting::MultiAssetAccounting, validation::ValidatedBalances};
+use crate::{accounting::MultiAssetAccounting, validation::ValidatedMultiAssetAccounting};
 use candid::{CandidType, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
+use icrc_ledger_types::icrc1::account::Account;
 use serde::Deserialize;
 use sns_treasury_manager::{
     Transaction, TransactionError, TransactionWitness, TreasuryManagerOperation,
@@ -51,6 +52,28 @@ impl Storable for StableTransaction {
         candid::decode_one(&bytes).expect("Cannot decode StableTransaction")
     }
 
+    const BOUND: Bound = Bound::Bounded {
+        // TODO: Enforce this bound.
+        max_size: 2048, // Increased size to accommodate all fields
+        is_fixed_size: false,
+    };
+}
+
+#[derive(CandidType, candid::Deserialize, Clone, Debug)]
+pub(crate) struct StableOwnerAccount {
+    pub owner_account: Account,
+}
+
+impl Storable for StableOwnerAccount {
+    fn to_bytes(&self) -> Cow<[u8]> {
+        Cow::Owned(candid::encode_one(self).expect("Cannot encode StableTransaction"))
+    }
+
+    fn from_bytes(bytes: Cow<[u8]>) -> Self {
+        candid::decode_one(&bytes).expect("Cannot decode StableTransaction")
+    }
+
+    // @todo can possibly be shrinked
     const BOUND: Bound = Bound::Bounded {
         // TODO: Enforce this bound.
         max_size: 2048, // Increased size to accommodate all fields

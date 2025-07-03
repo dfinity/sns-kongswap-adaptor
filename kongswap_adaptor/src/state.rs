@@ -2,8 +2,8 @@ use crate::{
     accounting::MultiAssetAccounting,
     log_err,
     state::storage::ConfigState,
-    validation::{ValidatedAsset, ValidatedBalances},
-    StableAuditTrail, StableBalances,
+    validation::{ValidatedAsset, ValidatedMultiAssetAccounting},
+    StableAuditTrail, StableBalances, StableOwnerAccounts,
 };
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
@@ -16,6 +16,7 @@ pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
     pub agent: A,
     pub balances: &'static LocalKey<RefCell<StableBalances>>,
     pub audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
+    pub owner_accounts: &'static LocalKey<RefCell<StableOwnerAccounts>>,
 }
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -23,26 +24,27 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         agent: A,
         balances: &'static LocalKey<RefCell<StableBalances>>,
         audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
+        owner_accounts: &'static LocalKey<RefCell<StableOwnerAccounts>>,
     ) -> Self {
         KongSwapAdaptor {
             agent,
             balances,
             audit_trail,
+            owner_accounts,
         }
     }
 
     /// This is safe to call only after the canister has been initialized.
     pub fn get_cached_balances(&self) -> MultiAssetAccounting {
-        todo!()
-        // self.balances.with_borrow(|balances| {
-        //     let ConfigState::Initialized(balances) = balances.get() else {
-        //         ic_cdk::trap("BUG: Balances should be initialized");
-        //     };
-        //     *balances
-        // })
+        self.balances.with_borrow(|balances| {
+            let ConfigState::Initialized(balances) = balances.get() else {
+                ic_cdk::trap("BUG: Balances should be initialized");
+            };
+            balances.clone()
+        })
     }
 
-    pub fn initialize(&self, init_balances: ValidatedBalances) {
+    pub fn initialize(&self, init_balances: ValidatedMultiAssetAccounting) {
         self.balances.with_borrow_mut(|cell| {
             if let ConfigState::Initialized(balances) = cell.get() {
                 log_err(&format!(
@@ -51,7 +53,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ));
             }
 
-            if let Err(err) = cell.set(ConfigState::Initialized(init_balances)) {
+            let multi_asset_accounting = MultiAssetAccounting::from(init_balances);
+
+            if let Err(err) = cell.set(ConfigState::Initialized(multi_asset_accounting)) {
                 log_err(&format!("Failed to initialize balances: {:?}", err));
             }
         });
@@ -61,7 +65,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// if the canister has been initialized.
     pub fn with_balances_mut<F>(&self, f: F)
     where
-        F: FnOnce(&mut ValidatedBalances),
+        F: FnOnce(&mut MultiAssetAccounting),
     {
         self.balances.with_borrow_mut(|cell| {
             let ConfigState::Initialized(balances) = cell.get() else {
@@ -77,29 +81,39 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         })
     }
 
-    pub fn assets(&self) -> (ValidatedAsset, ValidatedAsset) {
-        let balances = self.get_cached_balances();
-        (balances.asset_0, balances.asset_1)
+    pub fn assets(&self) -> Vec<ValidatedAsset> {
+        let multi_asset_accounting = self.get_cached_balances();
+        multi_asset_accounting
+            .asset_to_accounting
+            .keys()
+            .cloned()
+            .collect()
     }
 
-    pub fn owner_accounts(&self) -> (Account, Account) {
-        let balances = self.get_cached_balances();
-        (balances.owner_account_0, balances.owner_account_1)
+    pub fn owner_accounts(&self) -> Vec<Account> {
+        self.owner_accounts.with_borrow(|owner_accounts| {
+            owner_accounts
+                .iter()
+                .map(|owner_account| owner_account.owner_account)
+                .collect()
+        })
     }
 
-    pub fn ledgers(&self) -> (Principal, Principal) {
+    pub fn ledgers(&self) -> Vec<Principal> {
         let balances = self.get_cached_balances();
-        (
-            balances.asset_0.ledger_canister_id(),
-            balances.asset_1.ledger_canister_id(),
-        )
+        balances
+            .asset_to_accounting
+            .keys()
+            .map(|asset| asset.ledger_canister_id())
+            .collect()
     }
 
-    pub fn fees(&self) -> (u64, u64) {
+    pub fn fees(&self) -> Vec<u64> {
         let balances = self.get_cached_balances();
-        (
-            balances.asset_0.ledger_fee_decimals(),
-            balances.asset_1.ledger_fee_decimals(),
-        )
+        balances
+            .asset_to_accounting
+            .keys()
+            .map(|asset| asset.ledger_fee_decimals())
+            .collect()
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
-    validation::ValidatedBalances,
+    validation::ValidatedMultiAssetAccounting,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -9,7 +9,7 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
-        let operation = TreasuryManagerOperation::Withdraw;
+        let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Withdraw);
 
         let remove_lp_token_amount = self.lp_balance(operation).await.map_err(|err| vec![err])?;
 
@@ -17,11 +17,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."
                 .to_string();
 
-        let (asset_0, asset_1) = self.assets();
+        let assets = self.assets();
 
         let request = RemoveLiquidityArgs {
-            token_0: asset_0.symbol(),
-            token_1: asset_1.symbol(),
+            token_0: assets[0].symbol(),
+            token_1: assets[1].symbol(),
             remove_lp_token_amount,
         };
 
@@ -51,7 +51,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub async fn retry_withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
-        let operation = TreasuryManagerOperation::Withdraw;
+        let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Withdraw);
 
         let human_readable =
             "Calling KongSwapBackend.claims to check if a retry withdrawal is needed.".to_string();
@@ -104,7 +104,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+    ) -> Result<ValidatedMultiAssetAccounting, Vec<TransactionError>> {
         let mut errors = vec![];
 
         if let Err(err) = self.withdraw_from_dex().await {
@@ -117,7 +117,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let returned_amounts = match self
             .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::Withdraw,
+                TreasuryManagerOperation::new(sns_treasury_manager::Operation::Withdraw),
                 withdraw_account_0,
                 withdraw_account_1,
             )

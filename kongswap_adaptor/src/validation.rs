@@ -1,14 +1,17 @@
-use crate::{log, log_err, ICP_LEDGER_CANISTER_ID};
+use crate::{
+    accounting::{self, MultiAssetAccounting, Party, SingleAssetAccounting},
+    ICP_LEDGER_CANISTER_ID,
+};
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
 use maplit::btreemap;
 use serde::Deserialize;
 use sns_treasury_manager::{
-    self, Accounts, Allowance, Asset, Balance, Balances, DepositRequest, TreasuryManagerInit,
-    WithdrawRequest,
+    self, Accounts, Allowance, Asset, Balance, Balances, BalancesForAsset, DepositRequest,
+    TreasuryManagerInit, WithdrawRequest,
 };
-use std::str::FromStr;
+use std::{collections::BTreeMap, env::var_os, str::FromStr};
 
 pub const MAX_SYMBOL_BYTES: usize = 10;
 
@@ -527,20 +530,121 @@ impl From<ValidatedAllowance> for Allowance {
     }
 }
 
-#[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct ValidatedBalances {
-    pub timestamp_ns: u64,
-
-    pub asset_0: ValidatedAsset,
-    pub asset_1: ValidatedAsset,
-    pub balance_0_decimals: u64,
-    pub balance_1_decimals: u64,
-
-    pub owner_account_0: Account,
-    pub owner_account_1: Account,
+#[derive(CandidType, Clone, Debug, Deserialize, PartialEq)]
+pub struct ValidatedBalance {
+    pub amount_decimals: u64,
+    pub account: Option<Account>,
 }
 
-impl ValidatedBalances {
+#[derive(CandidType, Clone, Debug, Deserialize, PartialEq)]
+pub struct ValidatedSingleAssetAccounting {
+    pub party_to_balance: BTreeMap<Party, ValidatedBalance>,
+}
+
+impl From<accounting::Party> for sns_treasury_manager::Party {
+    fn from(value: accounting::Party) -> Self {
+        match value {
+            accounting::Party::TreasuryOwner => Self::TreasuryOwner,
+            accounting::Party::TreasuryManager => Self::TreasuryManager,
+            accounting::Party::External => Self::External,
+            accounting::Party::LedgerFee => Self::LedgerFee,
+        }
+    }
+}
+
+impl From<sns_treasury_manager::Party> for accounting::Party {
+    fn from(value: sns_treasury_manager::Party) -> Self {
+        match value {
+            sns_treasury_manager::Party::TreasuryOwner => Self::TreasuryOwner,
+            sns_treasury_manager::Party::TreasuryManager => Self::TreasuryManager,
+            sns_treasury_manager::Party::External => Self::External,
+            sns_treasury_manager::Party::LedgerFee => Self::LedgerFee,
+        }
+    }
+}
+
+impl From<ValidatedSingleAssetAccounting> for BalancesForAsset {
+    fn from(value: ValidatedSingleAssetAccounting) -> Self {
+        let party_to_balance = value
+            .party_to_balance
+            .iter()
+            .map(|(party, validated_balance)| {
+                (
+                    sns_treasury_manager::Party::from(party.clone()),
+                    Balance::from(validated_balance.clone()),
+                )
+            })
+            .collect();
+
+        Self {
+            party_to_balance: Some(party_to_balance),
+        }
+    }
+}
+
+impl From<ValidatedBalance> for Balance {
+    fn from(value: ValidatedBalance) -> Self {
+        Self {
+            amount_decimals: Nat::from(value.amount_decimals),
+            account: value.account.map(|account| sns_treasury_manager::Account {
+                owner: account.owner,
+                subaccount: account.subaccount,
+            }),
+        }
+    }
+}
+
+impl TryFrom<Balance> for ValidatedBalance {
+    type Error = String;
+    fn try_from(value: Balance) -> Result<Self, Self::Error> {
+        let Ok(amount_decimals) = decode_nat_to_u64(value.amount_decimals.clone()) else {
+            return Err(format!(
+                "Failed to convert amount {} to u64",
+                value.amount_decimals
+            ));
+        };
+
+        Ok(Self {
+            amount_decimals,
+            account: value
+                .account
+                .map(|account| account_into_icrc1_account(&account)),
+        })
+    }
+}
+
+impl TryFrom<BalancesForAsset> for ValidatedSingleAssetAccounting {
+    type Error = String;
+    fn try_from(value: BalancesForAsset) -> Result<Self, Self::Error> {
+        let Some(party_to_balance) = value.party_to_balance else {
+            return Err(format!("No accounting present"));
+        };
+
+        let (party_to_balance, errors): (BTreeMap<_, _>, Vec<_>) =
+            party_to_balance.iter().partition_map(|(party, balance)| {
+                let party = Party::from(party.clone());
+                match ValidatedBalance::try_from(balance.clone()) {
+                    Ok(validated_balance) => Either::Left((party, validated_balance)),
+                    Err(err) => Either::Right(err),
+                }
+            });
+
+        if !errors.is_empty() {
+            let errors = errors.join(", ");
+            return Err(format!("Failed to validate balances:\nerrors: {}.", errors));
+        }
+
+        Ok(ValidatedSingleAssetAccounting { party_to_balance })
+    }
+}
+
+#[derive(CandidType, Clone, Deserialize)]
+pub(crate) struct ValidatedMultiAssetAccounting {
+    pub timestamp_ns: u64,
+    pub asset_to_accounting: BTreeMap<ValidatedAsset, ValidatedSingleAssetAccounting>,
+}
+
+impl ValidatedMultiAssetAccounting {
     pub fn new(
         asset_0: ValidatedAsset,
         asset_1: ValidatedAsset,
@@ -549,14 +653,28 @@ impl ValidatedBalances {
         owner_account_0: Account,
         owner_account_1: Account,
     ) -> Self {
+        let asset_to_balances = btreemap! {
+            asset_0 => ValidatedSingleAssetAccounting {
+                party_to_balance: btreemap! {
+                Party::TreasuryOwner => ValidatedBalance {
+                    amount_decimals: balance_0_decimals,
+                    account: Some(owner_account_0)
+                },
+            }
+            },
+            asset_1 => ValidatedSingleAssetAccounting {
+                party_to_balance: btreemap! {
+                Party::TreasuryOwner => ValidatedBalance {
+                    amount_decimals: balance_1_decimals,
+                    account: Some(owner_account_1)
+                },
+            }
+            } ,
+        };
+
         Self {
             timestamp_ns: ic_cdk::api::time(),
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
+            asset_to_accounting: asset_to_balances,
         }
     }
 
@@ -566,161 +684,139 @@ impl ValidatedBalances {
         owner_account_0: Account,
         owner_account_1: Account,
     ) -> Self {
-        Self {
-            timestamp_ns: ic_cdk::api::time(),
-            balance_0_decimals: 0,
-            balance_1_decimals: 0,
-            asset_0,
-            asset_1,
-            owner_account_0,
-            owner_account_1,
-        }
-    }
-
-    pub fn set(&mut self, balance_0_decimals: u64, balance_1_decimals: u64, timestamp_ns: u64) {
-        self.balance_0_decimals = balance_0_decimals;
-        self.balance_1_decimals = balance_1_decimals;
-        self.timestamp_ns = timestamp_ns;
-    }
-
-    /// Refreshes the asset with the given `asset_id` (0 or 1) with a new asset.
-    ///
-    /// Returns whether the asset was changed.
-    pub fn refresh_asset(&mut self, asset_id: usize, new_asset: ValidatedAsset) {
-        let asset = if asset_id == 0 {
-            &mut self.asset_0
-        } else if asset_id == 1 {
-            &mut self.asset_1
-        } else {
-            log_err(&format!("Invalid asset_id {}: must be 0 or 1.", asset_id));
-            return;
+        let asset_to_balances = btreemap! {
+            asset_0 => ValidatedSingleAssetAccounting {
+                party_to_balance: btreemap! {
+                Party::TreasuryOwner => ValidatedBalance {
+                    amount_decimals: 0,
+                    account: Some(owner_account_0)
+                },
+            }
+            },
+            asset_1 => ValidatedSingleAssetAccounting {
+                party_to_balance: btreemap! {
+                Party::TreasuryOwner => ValidatedBalance {
+                    amount_decimals: 0,
+                    account: Some(owner_account_1)
+                },
+            }
+            } ,
         };
 
-        let old_asset = asset.clone();
-
-        let ValidatedAsset::Token {
-            symbol: new_symbol,
-            ledger_fee_decimals: new_ledger_fee_decimals,
-            ledger_canister_id: _,
-        } = new_asset;
-
-        if asset.set_symbol(new_symbol) {
-            log(&format!(
-                "Changed asset_{} symbol from `{}` to `{}`.",
-                asset_id,
-                old_asset.symbol(),
-                new_symbol,
-            ));
-        }
-
-        if asset.set_ledger_fee_decimals(new_ledger_fee_decimals) {
-            log(&format!(
-                "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
-                asset_id,
-                old_asset.ledger_fee_decimals(),
-                new_ledger_fee_decimals,
-            ));
+        Self {
+            timestamp_ns: ic_cdk::api::time(),
+            asset_to_accounting: asset_to_balances,
         }
     }
 }
 
-impl From<ValidatedBalances> for Balances {
-    fn from(value: ValidatedBalances) -> Self {
-        let ValidatedBalances {
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
+impl From<ValidatedMultiAssetAccounting> for Balances {
+    fn from(value: ValidatedMultiAssetAccounting) -> Self {
+        let ValidatedMultiAssetAccounting {
+            asset_to_accounting: asset_to_balances,
             timestamp_ns,
         } = value;
 
-        let token_0 = Asset::from(asset_0);
-        let token_1 = Asset::from(asset_1);
-
-        let balances = btreemap! {
-            token_0 => Balance {
-                amount_decimals: Nat::from(balance_0_decimals),
-                owner_account: icrc1_account_into_account(&owner_account_0),
-            },
-            token_1 => Balance {
-                amount_decimals: Nat::from(balance_1_decimals),
-                owner_account: icrc1_account_into_account(&owner_account_1),
-            },
-        };
+        let asset_to_balances = asset_to_balances
+            .iter()
+            .map(|(asset, balances)| {
+                (
+                    Asset::from(*asset),
+                    BalancesForAsset::from(balances.clone()),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
 
         Balances {
-            balances,
+            asset_to_balances: Some(asset_to_balances),
             timestamp_ns,
         }
     }
 }
 
-impl TryFrom<Balances> for ValidatedBalances {
+impl TryFrom<Balances> for ValidatedMultiAssetAccounting {
     type Error = String;
 
     fn try_from(value: Balances) -> Result<Self, Self::Error> {
         let Balances {
-            balances,
+            asset_to_balances,
             timestamp_ns,
         } = value;
 
-        if balances.len() != 2 {
+        let Some(asset_to_balances) = asset_to_balances else {
+            return Err(format!("There are no assets"));
+        };
+
+        if asset_to_balances.len() != 2 {
             return Err(format!(
                 "Expected exactly two balances, got {}.",
-                balances.len()
+                asset_to_balances.len()
             ));
         }
 
-        let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
-            balances.iter().partition_map(
-                |(
-                    _,
-                    Balance {
-                        amount_decimals,
-                        owner_account,
-                    },
-                )| {
-                    let owner_account = account_into_icrc1_account(owner_account);
-                    match decode_nat_to_u64(amount_decimals.clone()) {
-                        Ok(amount_decimals) => Either::Left((amount_decimals, owner_account)),
-                        Err(err) => Either::Right(err),
+        let (asset_to_balances, errors): (BTreeMap<_, _>, Vec<_>) = asset_to_balances
+            .iter()
+            .partition_map(|(asset, balances_for_asset)| {
+                match (
+                    ValidatedAsset::try_from(asset.clone()),
+                    ValidatedSingleAssetAccounting::try_from(balances_for_asset.clone()),
+                ) {
+                    (Ok(validated_asset), Ok(validated_balances_for_aaset)) => {
+                        Either::Left((validated_asset, validated_balances_for_aaset))
                     }
-                },
-            );
-
-        let (assets, asset_errors): (Vec<_>, Vec<_>) =
-            balances.iter().partition_map(|(asset, _)| {
-                match ValidatedAsset::try_from(asset.clone()) {
-                    Ok(asset) => Either::Left(asset),
-                    Err(err) => Either::Right(err),
+                    (Ok(_), Err(err)) => Either::Right(err),
+                    (Err(err), Ok(_)) => Either::Right(err),
+                    (Err(err1), Err(err2)) => Either::Right(format!("{}, {}", err1, err2)),
                 }
             });
 
-        if amount_errors.len() > 0 || asset_errors.len() > 0 {
-            let amount_errors = amount_errors.join(", ");
-            let asset_errors = asset_errors.join(", ");
-            return Err(format!(
-                "Failed to validate balances:\n amount errors:\n {}; asset errors: {}.",
-                amount_errors, asset_errors,
-            ));
+        if !errors.is_empty() {
+            let errors = errors.join(", ");
+            return Err(format!("Failed to validate balances:\nerrors: {}.", errors));
         }
 
-        let (asset_0, asset_1) = validate_assets(assets)?;
+        let assets = asset_to_balances.keys().cloned().collect::<Vec<_>>();
 
-        // Safe due to the previous validation that ensures exactly two balances and zero errors.
-        let (balance_0_decimals, owner_account_0) = amount_decimals_owner_account_vec[0];
-        let (balance_1_decimals, owner_account_1) = amount_decimals_owner_account_vec[1];
+        let _ = validate_assets(assets)?;
 
         Ok(Self {
             timestamp_ns,
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
+            asset_to_accounting: asset_to_balances,
         })
+    }
+}
+
+impl From<ValidatedSingleAssetAccounting> for SingleAssetAccounting {
+    fn from(value: ValidatedSingleAssetAccounting) -> Self {
+        let party_to_balance = value
+            .party_to_balance
+            .iter()
+            .map(|(party, balance)| (party.clone(), balance.amount_decimals))
+            .collect();
+
+        Self {
+            party_to_balance,
+            journal: vec![],
+        }
+    }
+}
+
+impl From<ValidatedMultiAssetAccounting> for MultiAssetAccounting {
+    fn from(value: ValidatedMultiAssetAccounting) -> Self {
+        let asset_to_accounting = value
+            .asset_to_accounting
+            .iter()
+            .map(|(asset, validated_balance)| {
+                (
+                    asset.clone(),
+                    SingleAssetAccounting::from(validated_balance.clone()),
+                )
+            })
+            .collect();
+
+        Self {
+            timestamp_ns: value.timestamp_ns,
+            asset_to_accounting,
+        }
     }
 }
