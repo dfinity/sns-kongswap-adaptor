@@ -1,4 +1,4 @@
-use crate::{accounting::ValidatedBalances, validation::ValidatedMultiAssetAccounting};
+use crate::accounting::ValidatedBalances;
 use candid::{CandidType, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
 use icrc_ledger_types::icrc1::account::Account;

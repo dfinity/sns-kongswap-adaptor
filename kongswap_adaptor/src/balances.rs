@@ -121,8 +121,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 }
             }
 
-            self.with_balances_mut(|multi_asset_accounting| {
-                multi_asset_accounting.refresh_asset(asset_id, old_asset, asset);
+            self.with_balances_mut(|validated_balances| {
+                validated_balances.refresh_asset();
             });
         }
 
@@ -172,14 +172,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Need to fetch balances of the other assets
         let balances = vec![balance_0_decimals, balance_1_decimals];
 
-        self.with_balances_mut(|multi_asset_accounting| {
-            for (asset, new_balance) in assets.iter().zip(balances.iter()) {
-                multi_asset_accounting.refresh_party_balances(
-                    crate::accounting::Party::External,
-                    asset,
-                    ic_cdk::api::time(),
-                    *new_balance,
-                );
+        self.with_balances_mut(|validated_balances| {
+            for _ in assets.iter().zip(balances.iter()) {
+                validated_balances.refresh_party_balances();
             }
         });
 

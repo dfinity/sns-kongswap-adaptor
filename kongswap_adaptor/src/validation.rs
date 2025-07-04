@@ -1,17 +1,15 @@
 use crate::{
-    accounting::{self, Party, ValidatedBalanceForAsset, ValidatedBalances},
+    accounting::{ValidatedBalances, ValidatedBalancesForAsset},
     ICP_LEDGER_CANISTER_ID,
 };
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
-use itertools::{Either, Itertools};
-use maplit::btreemap;
 use serde::Deserialize;
 use sns_treasury_manager::{
     self, Accounts, Allowance, Asset, Balance, Balances, BalancesForAsset, DepositRequest,
     TreasuryManagerInit, WithdrawRequest,
 };
-use std::{collections::BTreeMap, env::var_os, str::FromStr};
+use std::str::FromStr;
 
 pub const MAX_SYMBOL_BYTES: usize = 10;
 
@@ -536,28 +534,6 @@ pub struct ValidatedBalance {
     pub account: Option<Account>,
 }
 
-impl From<accounting::Party> for sns_treasury_manager::Party {
-    fn from(value: accounting::Party) -> Self {
-        match value {
-            accounting::Party::TreasuryOwner => Self::TreasuryOwner,
-            accounting::Party::TreasuryManager => Self::TreasuryManager,
-            accounting::Party::External => Self::External,
-            accounting::Party::LedgerFee => Self::LedgerFee,
-        }
-    }
-}
-
-impl From<sns_treasury_manager::Party> for accounting::Party {
-    fn from(value: sns_treasury_manager::Party) -> Self {
-        match value {
-            sns_treasury_manager::Party::TreasuryOwner => Self::TreasuryOwner,
-            sns_treasury_manager::Party::TreasuryManager => Self::TreasuryManager,
-            sns_treasury_manager::Party::External => Self::External,
-            sns_treasury_manager::Party::LedgerFee => Self::LedgerFee,
-        }
-    }
-}
-
 impl From<ValidatedBalance> for Balance {
     fn from(value: ValidatedBalance) -> Self {
         Self {
@@ -586,5 +562,35 @@ impl TryFrom<Balance> for ValidatedBalance {
                 .account
                 .map(|account| account_into_icrc1_account(&account)),
         })
+    }
+}
+
+impl From<ValidatedBalancesForAsset> for BalancesForAsset {
+    fn from(value: ValidatedBalancesForAsset) -> Self {
+        Self {
+            treasury_owner: Some(value.treasury_owner.clone()),
+            treasury_manager: Some(value.treasury_manager.clone()),
+            external: Some(value.external.clone()),
+            fee_collector: Some(value.fee_collector.clone()),
+        }
+    }
+}
+
+impl From<ValidatedBalances> for Balances {
+    fn from(value: ValidatedBalances) -> Self {
+        let asset_to_balances = value
+            .asset_to_balances
+            .iter()
+            .map(|(validated_asset, validated_balance_for_asset)| {
+                let asset = Asset::from(validated_asset.clone());
+                let balance_for_asset = BalancesForAsset::from(validated_balance_for_asset.clone());
+                (asset, balance_for_asset)
+            })
+            .collect();
+
+        Self {
+            timestamp_ns: value.timestamp_ns,
+            asset_to_balances: Some(asset_to_balances),
+        }
     }
 }

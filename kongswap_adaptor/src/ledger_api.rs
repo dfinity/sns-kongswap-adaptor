@@ -1,6 +1,7 @@
 use crate::{
-    state::KongSwapAdaptor,
-    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedMultiAssetAccounting},
+    accounting::ValidatedBalances,
+    state::{storage::ConfigState, KongSwapAdaptor},
+    validation::{decode_nat_to_u64, ValidatedAsset},
 };
 use candid::Nat;
 use icrc_ledger_types::icrc1::{
@@ -8,7 +9,6 @@ use icrc_ledger_types::icrc1::{
     transfer::{Memo, TransferArg},
 };
 use kongswap_adaptor::agent::AbstractAgent;
-use maplit::btreemap;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -63,7 +63,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         operation: TreasuryManagerOperation,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedMultiAssetAccounting, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
         let assets = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
@@ -123,20 +123,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        // let asset_to_accounting = btreemap! {
-        //     assets[0] => return_amount_0_decimals,
-        //     assets[1] => return_amount_1_decimals
-        // };
+        let validated_balances = self.balances.with_borrow(|cell| {
+            if let ConfigState::Initialized(validated_balances) = cell.get() {
+                validated_balances.clone()
+            } else {
+                ValidatedBalances::new()
+            }
+        });
 
-        // let returned_amounts = ValidatedMultiAssetAccounting {
-        //     timestamp_ns: ic_cdk::api::time(),
-        //     asset_to_accounting,
-        // };
-
-        // Ok(returned_amounts)
-
-        // manipulate self.accounting
-
-        todo!()
+        Ok(validated_balances)
     }
 }

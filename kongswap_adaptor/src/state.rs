@@ -1,9 +1,6 @@
 use crate::{
-    accounting::{ValidatedBalanceForAsset, ValidatedBalances},
-    log_err,
-    state::storage::ConfigState,
-    validation::ValidatedAsset,
-    StableAuditTrail, StableBalances, StableOwnerAccounts,
+    accounting::ValidatedBalances, log_err, state::storage::ConfigState,
+    validation::ValidatedAsset, StableAuditTrail, StableBalances, StableOwnerAccounts,
 };
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
@@ -44,7 +41,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         })
     }
 
-    pub fn initialize(&self, assets: Vec<ValidatedAsset>, owner_accounts: Vec<Account>) {
+    pub fn initialize(&self, _assets: Vec<ValidatedAsset>, owner_accounts: Vec<Account>) {
         self.balances.with_borrow_mut(|cell| {
             if let ConfigState::Initialized(balances) = cell.get() {
                 log_err(&format!(
@@ -53,13 +50,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ));
             }
 
-            let validated_balances = ValidatedBalances {
-                timestamp_ns: ic_cdk::api::time(),
-                asset_to_accounting: assets
-                    .iter()
-                    .map(|asset| (asset.clone(), ValidatedBalanceForAsset::default()))
-                    .collect(),
-            };
+            let validated_balances = ValidatedBalances::new();
 
             if let Err(err) = cell.set(ConfigState::Initialized(validated_balances)) {
                 log_err(&format!("Failed to initialize balances: {:?}", err));
@@ -101,7 +92,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn assets(&self) -> Vec<ValidatedAsset> {
         let multi_asset_accounting = self.get_cached_balances();
         multi_asset_accounting
-            .asset_to_accounting
+            .asset_to_balances
             .keys()
             .cloned()
             .collect()
@@ -119,7 +110,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn ledgers(&self) -> Vec<Principal> {
         let balances = self.get_cached_balances();
         balances
-            .asset_to_accounting
+            .asset_to_balances
             .keys()
             .map(|asset| asset.ledger_canister_id())
             .collect()
@@ -128,7 +119,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn fees(&self) -> Vec<u64> {
         let balances = self.get_cached_balances();
         balances
-            .asset_to_accounting
+            .asset_to_balances
             .keys()
             .map(|asset| asset.ledger_fee_decimals())
             .collect()

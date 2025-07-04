@@ -2,8 +2,10 @@ use crate::{
     accounting::ValidatedBalances,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
-        AddPoolArgs, AddPoolReply,
+        AddPoolArgs,
     },
+    log_err,
+    state::storage::ConfigState,
     validation::{saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -147,25 +149,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         match result {
             // All used up, since the pool is brand new.
-            Ok(AddPoolReply {
-                symbol_0,
-                address_0,
-                amount_0,
-                symbol_1,
-                amount_1,
-                address_1,
-                ..
-            }) => {
-                return self.reply_params_to_result(
-                    symbol_0,
-                    address_0,
-                    amount_0,
-                    allowance_0.owner_account,
-                    symbol_1,
-                    amount_1,
-                    address_1,
-                    allowance_1.owner_account,
-                );
+            Ok(_) => {
+                let balances = self.balances.with_borrow(|cell| {
+                    let ConfigState::Initialized(balances) = cell.get() else {
+                        log_err(&format!("Accounting doesn't exist. Make sure that you have initialised the canister correctly"));
+                        return ValidatedBalances::new();
+                    };
+
+                    balances.clone()
+                });
+
+                return Ok(balances);
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
@@ -228,15 +222,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await?
         };
 
-        let AddLiquidityReply {
-            symbol_0,
-            address_0,
-            amount_0,
-            symbol_1,
-            amount_1,
-            address_1,
-            ..
-        } = reply;
+        let AddLiquidityReply { amount_1, .. } = reply;
 
         // @todo
         if original_amount_1 < amount_1 {
@@ -246,16 +232,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )));
         }
 
-        self.reply_params_to_result(
-            symbol_0,
-            address_0,
-            amount_0,
-            allowance_0.owner_account,
-            symbol_1,
-            amount_1,
-            address_1,
-            allowance_1.owner_account,
-        )
+        let balances = self.balances.with_borrow(|cell| {
+            let ConfigState::Initialized(balances) = cell.get() else {
+                log_err(&format!("Accounting doesn't exist. Make sure that you have initialised the canister correctly"));
+                return ValidatedBalances::new();
+            };
+
+            balances.clone()
+        });
+
+        Ok(balances)
     }
 
     pub async fn deposit_impl(

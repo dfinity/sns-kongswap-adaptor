@@ -1,8 +1,6 @@
-use crate::accounting::ValidatedBalances;
 use crate::state::storage::{ConfigState, StableOwnerAccount, StableTransaction};
 use crate::validation::{
-    ValidatedDepositRequest, ValidatedMultiAssetAccounting, ValidatedTreasuryManagerInit,
-    ValidatedWithdrawRequest,
+    ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
 use candid::Principal;
 use ic_canister_log::{declare_log_buffer, log};
@@ -12,11 +10,10 @@ use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableV
 use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
 use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
-use maplit::btreemap;
 use sns_treasury_manager::{
-    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesForAsset, BalancesRequest,
-    DepositRequest, Transaction, TransactionError, TreasuryManager, TreasuryManagerArg,
-    TreasuryManagerResult, WithdrawRequest,
+    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest,
+    Transaction, TransactionError, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
+    WithdrawRequest,
 };
 use state::KongSwapAdaptor;
 use std::{cell::RefCell, time::Duration};
@@ -171,8 +168,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     fn balances(&self, _request: BalancesRequest) -> TreasuryManagerResult {
-        todo!()
-        // Ok(Balances::from(self.get_cached_balances()))
+        Ok(Balances::from(self.get_cached_balances()))
     }
 
     async fn refresh_balances(&mut self) {

@@ -13,8 +13,8 @@ type TransactionError = variant {
 type BalancesForAsset = record {
   treasury_owner : opt Balance;
   treasury_manager : opt Balance;
-  external : opt ExternalBalance;
-  fee_collector : opt ExternalBalance;
+  external : opt Balance;
+  fee_collector : opt Balance;
 };
 
 
@@ -23,14 +23,9 @@ type Balances = record {
   asset_to_balances : opt vec record { Asset; BalancesForAsset };
 };
 
-type ExternalBalance = record {
-  amount_decimals : nat;
-  account : opt Account;
-};
-
 type Balance = record {
   amount_decimals : nat;
-  account : Account;
+  account : opt Account;
 };
 
 type Account = record {
