@@ -10,25 +10,27 @@ type TransactionError = variant {
   Backend : text;
 };
 
-type Party = variant {
-  TreasuryOwner;
-  TreasuryManager;
-  External;
-  LedgerFee;
+type BalancesForAsset = record {
+  treasury_owner : opt Balance;
+  treasury_manager : opt Balance;
+  external : opt ExternalBalance;
+  fee_collector : opt ExternalBalance;
 };
 
-type BalancesForAsset = record {
-  party_to_balance : opt vec record { Party; Balance };
-};
 
 type Balances = record {
   timestamp_ns : nat64;
   asset_to_balances : opt vec record { Asset; BalancesForAsset };
 };
 
-type Balance = record {
+type ExternalBalance = record {
   amount_decimals : nat;
   account : opt Account;
+};
+
+type Balance = record {
+  amount_decimals : nat;
+  account : Account;
 };
 
 type Account = record {
