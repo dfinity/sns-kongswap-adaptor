@@ -3,6 +3,7 @@ use crate::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
+    tx_error_codes::TransactionErrorCodes,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::{Nat, Principal};
@@ -93,7 +94,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         if !errors.is_empty() {
             return Err(TransactionError::Backend {
                 error: format!("Failed to convert balances: {:?}", errors.join(", ")),
-                code: 0,
+                code: u64::from(TransactionErrorCodes::BackendCode),
             });
         }
 
@@ -102,7 +103,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
             return Err(TransactionError::Backend {
                 error: format!("Failed to get LP balance for {}.", lp_token),
-                code: 0,
+                code: u64::from(TransactionErrorCodes::BackendCode),
             });
         };
 

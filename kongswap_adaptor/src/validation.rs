@@ -270,6 +270,8 @@ impl TryFrom<(Principal, Principal, Account, Account, WithdrawRequest)>
     fn try_from(
         value: (Principal, Principal, Account, Account, WithdrawRequest),
     ) -> Result<Self, Self::Error> {
+        let mut errors = vec![];
+
         let (
             ledger_0,
             ledger_1,
@@ -280,15 +282,26 @@ impl TryFrom<(Principal, Principal, Account, Account, WithdrawRequest)>
 
         let (withdraw_account_0, withdraw_account_1) =
             if let Some(ledger_to_account) = withdraw_accounts {
-                let withdraw_account_0 = ledger_to_account.get(&ledger_0).ok_or(format!(
-                    "Withdraw account for ledger {} not found.",
-                    ledger_0
-                ))?;
+                if ledger_to_account.get(&ledger_0).is_none() {
+                    errors.push(format!(
+                        "Withdraw account for ledger {} not found.",
+                        ledger_0
+                    ));
+                }
 
-                let withdraw_account_1 = ledger_to_account.get(&ledger_1).ok_or(format!(
-                    "Withdraw account for ledger {} not found.",
-                    ledger_1
-                ))?;
+                if ledger_to_account.get(&ledger_1).is_none() {
+                    errors.push(format!(
+                        "Withdraw account for ledger {} not found.",
+                        ledger_1
+                    ));
+                }
+
+                if !errors.is_empty() {
+                    return Err(errors.join(", "));
+                }
+
+                let withdraw_account_0 = ledger_to_account.get(&ledger_0).unwrap();
+                let withdraw_account_1 = ledger_to_account.get(&ledger_1).unwrap();
 
                 (
                     account_into_icrc1_account(withdraw_account_0),
@@ -552,28 +565,36 @@ impl From<ValidatedBalance> for Balance {
 impl TryFrom<Balance> for ValidatedBalance {
     type Error = String;
     fn try_from(value: Balance) -> Result<Self, Self::Error> {
-        let Ok(amount_decimals) = decode_nat_to_u64(value.amount_decimals.clone()) else {
-            return Err(format!(
+        let mut errors = vec![];
+
+        let amount_decimals_result = decode_nat_to_u64(value.amount_decimals.clone());
+        if amount_decimals_result.is_err() {
+            errors.push(format!(
                 "Failed to convert amount {} to u64",
                 value.amount_decimals
             ));
         };
 
-        let Some(icrc1_account) = value
+        let icrc1_account = value
             .account
-            .map(|account| account_into_icrc1_account(&account))
-        else {
-            return Err(format!("Owner account of the balance is not set"));
+            .map(|account| account_into_icrc1_account(&account));
+
+        if icrc1_account.is_none() {
+            errors.push(format!("Owner account of the balance is not set"));
         };
 
-        let Some(name) = value.name else {
-            return Err(format!("Name is not set"));
+        if value.name.is_none() {
+            errors.push(format!("Name is not set"));
         };
+
+        if !errors.is_empty() {
+            return Err(errors.join(", "));
+        }
 
         Ok(Self {
-            amount_decimals,
-            account: icrc1_account,
-            name,
+            amount_decimals: amount_decimals_result.unwrap(),
+            account: icrc1_account.unwrap(),
+            name: value.name.unwrap(),
         })
     }
 }
@@ -620,48 +641,3 @@ impl From<ValidatedBalances> for Balances {
         }
     }
 }
-
-// impl TryFrom<Balances> for ValidatedBalances {
-//     type Error = String;
-//
-//     fn try_from(value: Balances) -> Result<Self, Self::Error> {
-//         let Balances {
-//             timestamp_ns,
-//             asset_to_balances,
-//         } = value;
-//
-//         let Some(asset_to_balances) = asset_to_balances else {
-//             return Err(format!("No asset to balance mapping is set"));
-//         };
-//
-//         if asset_to_balances.len() != 2 {
-//             return Err(format!(
-//                 "Expected exactly two assets, got {}.",
-//                 asset_to_balances.len()
-//             ));
-//         }
-//
-//         let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
-//             asset_to_balances.iter().partition_map(
-//                 |(
-//                     _,
-//                     BalanceBook {
-//                         treasury_owner,
-//                         treasury_manager,
-//                         external,
-//                         fee_collector,
-//                         spendings,
-//                         earnings,
-//                     },
-//                 )| {
-//                     let owner_account = account_into_icrc1_account(owner_account);
-//                     match decode_nat_to_u64(amount_decimals.clone()) {
-//                         Ok(amount_decimals) => Either::Left((amount_decimals, owner_account)),
-//                         Err(err) => Either::Right(err),
-//                     }
-//                 },
-//             );
-//
-//         todo!()
-//     }
-// }

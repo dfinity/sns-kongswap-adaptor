@@ -4,6 +4,7 @@ use crate::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs,
     },
+    tx_error_codes::TransactionErrorCodes,
     validation::{saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -34,7 +35,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             if new_ledger_0 != old_asset_0.ledger_canister_id()
                 || new_ledger_1 != old_asset_1.ledger_canister_id()
             {
-                return Err(TransactionError::Precondition{
+                return Err(TransactionError::Precondition {
                     error: format!(
                     "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
                     old_asset_0.symbol(),
@@ -42,7 +43,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     new_ledger_0,
                     new_ledger_1,
                 ),
-                code: 0});
+                code: u64::from(TransactionErrorCodes::PreConditionCode)
+            });
             }
         }
 
@@ -215,14 +217,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let AddLiquidityReply { amount_1, .. } = reply;
 
-        // @todo
+        // @todo As we discussed, the direction of this comparison is reversed.
         if original_amount_1 < amount_1 {
             return Err(TransactionError::Backend {
                 error: format!(
                     "Got top-up amount_1 = {} (must be at least {})",
                     original_amount_1, amount_1
                 ),
-                code: 0,
+                code: u64::from(TransactionErrorCodes::BackendCode),
             });
         }
 

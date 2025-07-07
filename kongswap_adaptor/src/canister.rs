@@ -1,4 +1,5 @@
 use crate::state::storage::{ConfigState, StableTransaction};
+use crate::tx_error_codes::TransactionErrorCodes;
 use crate::validation::{
     ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
@@ -26,6 +27,7 @@ mod kong_types;
 mod ledger_api;
 mod rewards;
 mod state;
+mod tx_error_codes;
 mod validation;
 mod withdraw;
 
@@ -124,7 +126,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
             .map_err(|err| {
                 vec![TransactionError::Precondition {
                     error: err,
-                    code: 0,
+                    code: u64::from(TransactionErrorCodes::PreConditionCode),
                 }]
             })?;
 
@@ -143,7 +145,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         } = request.try_into().map_err(|err| {
             vec![TransactionError::Precondition {
                 error: err,
-                code: 0,
+                code: u64::from(TransactionErrorCodes::PreConditionCode),
             }]
         })?;
 

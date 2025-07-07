@@ -1,6 +1,7 @@
 use crate::{
     balances::ValidatedBalances,
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
+    tx_error_codes::TransactionErrorCodes,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -46,7 +47,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     "Withdrawal from DEX might not be complete, returned claims: {}.",
                     claim_ids
                 ),
-                code: 0,
+                code: u64::from(TransactionErrorCodes::BackendCode),
             }]);
         }
 

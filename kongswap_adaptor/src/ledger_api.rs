@@ -1,6 +1,7 @@
 use crate::{
     balances::ValidatedBalances,
     state::KongSwapAdaptor,
+    tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset},
 };
 use candid::Nat;
@@ -34,8 +35,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .emit_transaction(ledger_canister_id, request, operation, human_readable)
             .await?;
 
-        let balance_decimals = decode_nat_to_u64(balance_decimals)
-            .map_err(|error| TransactionError::Postcondition { error, code: 0 })?;
+        let balance_decimals = decode_nat_to_u64(balance_decimals).map_err(|error| {
+            TransactionError::Postcondition {
+                error,
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+            }
+        })?;
 
         Ok(balance_decimals)
     }
