@@ -1,6 +1,6 @@
 use crate::{
-    accounting::ValidatedBalances,
-    state::{storage::ConfigState, KongSwapAdaptor},
+    balances::ValidatedBalances,
+    state::KongSwapAdaptor,
     validation::{decode_nat_to_u64, ValidatedAsset},
 };
 use candid::Nat;
@@ -34,8 +34,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .emit_transaction(ledger_canister_id, request, operation, human_readable)
             .await?;
 
-        let balance_decimals =
-            decode_nat_to_u64(balance_decimals).map_err(TransactionError::Postcondition)?;
+        let balance_decimals = decode_nat_to_u64(balance_decimals)
+            .map_err(|error| TransactionError::Postcondition { error, code: 0 })?;
 
         Ok(balance_decimals)
     }
@@ -44,12 +44,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         operation: TreasuryManagerOperation,
     ) -> Result<(u64, u64), Vec<TransactionError>> {
-        let assets = self.assets();
+        let (asset_0, asset_1) = self.assets();
 
         // TODO: These calls could be parallelized.
-        let balance_0_decimals = self.get_ledger_balance_decimals(operation, assets[0]).await;
+        let balance_0_decimals = self.get_ledger_balance_decimals(operation, asset_0).await;
 
-        let balance_1_decimals = self.get_ledger_balance_decimals(operation, assets[1]).await;
+        let balance_1_decimals = self.get_ledger_balance_decimals(operation, asset_1).await;
 
         match (balance_0_decimals, balance_1_decimals) {
             (Ok(balance_0), Ok(balance_1)) => Ok((balance_0, balance_1)),
@@ -64,7 +64,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         withdraw_account_0: Account,
         withdraw_account_1: Account,
     ) -> Result<ValidatedBalances, Vec<TransactionError>> {
-        let assets = self.assets();
+        let (asset_0, asset_1) = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
 
@@ -73,10 +73,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 self.get_ledger_balances(operation).await?;
 
             let return_amount_0_decimals =
-                balance_0_decimals.saturating_sub(assets[0].ledger_fee_decimals());
+                balance_0_decimals.saturating_sub(asset_0.ledger_fee_decimals());
 
             let return_amount_1_decimals =
-                balance_1_decimals.saturating_sub(assets[1].ledger_fee_decimals());
+                balance_1_decimals.saturating_sub(asset_1.ledger_fee_decimals());
 
             (return_amount_0_decimals, return_amount_1_decimals)
         };
@@ -84,8 +84,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let mut withdraw_errors = vec![];
 
         for (asset, amount_decimals, withdraw_account) in [
-            (assets[0], return_amount_0_decimals, withdraw_account_0),
-            (assets[1], return_amount_1_decimals, withdraw_account_1),
+            (asset_0, return_amount_0_decimals, withdraw_account_0),
+            (asset_1, return_amount_1_decimals, withdraw_account_1),
         ] {
             if amount_decimals == 0 {
                 continue;
@@ -123,14 +123,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        let validated_balances = self.balances.with_borrow(|cell| {
-            if let ConfigState::Initialized(validated_balances) = cell.get() {
-                validated_balances.clone()
-            } else {
-                ValidatedBalances::new()
-            }
-        });
-
-        Ok(validated_balances)
+        Ok(self.get_cached_balances())
     }
 }

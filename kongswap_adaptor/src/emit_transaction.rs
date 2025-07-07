@@ -27,6 +27,7 @@ where
             method: request.method().to_string(),
             error: error.to_string(),
             canister_id,
+            code: 0,
         });
 
     let (result, function_output) = match call_result {
@@ -34,7 +35,10 @@ where
         Ok(response) => {
             let res = request
                 .transaction_witness(canister_id, response)
-                .map_err(|err| TransactionError::Backend(err.to_string()));
+                .map_err(|err| TransactionError::Backend {
+                    error: err.to_string(),
+                    code: 0,
+                });
 
             match res {
                 Err(err) => (Err(err.clone()), Err(err)),

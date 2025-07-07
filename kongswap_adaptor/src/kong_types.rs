@@ -348,6 +348,8 @@ impl From<&TransferIdReply> for Transfer {
             ledger_canister_id,
             amount_decimals: amount_deimals,
             block_index,
+            sender: None,
+            receiver: None,
         }
     }
 }

@@ -10,17 +10,18 @@ type TransactionError = variant {
   Backend : text;
 };
 
-type BalancesForAsset = record {
+type BalanceBook = record {
   treasury_owner : opt Balance;
   treasury_manager : opt Balance;
   external : opt Balance;
   fee_collector : opt Balance;
+  spendings : opt Balance;
+  earnings : opt Balance;
 };
-
 
 type Balances = record {
   timestamp_ns : nat64;
-  asset_to_balances : opt vec record { Asset; BalancesForAsset };
+  asset_to_balances : opt vec record { Asset; BalanceBook };
 };
 
 type Balance = record {

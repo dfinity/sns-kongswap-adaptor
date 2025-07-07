@@ -1,13 +1,14 @@
 use crate::{
-    accounting::{ValidatedBalances, ValidatedBalancesForAsset},
+    balances::{ValidatedBalanceBook, ValidatedBalances},
     ICP_LEDGER_CANISTER_ID,
 };
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
+use maplit::btreemap;
 use serde::Deserialize;
 use sns_treasury_manager::{
-    self, Accounts, Allowance, Asset, Balance, Balances, BalancesForAsset, DepositRequest,
-    TreasuryManagerInit, WithdrawRequest,
+    self, Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManagerInit,
+    WithdrawRequest,
 };
 use std::str::FromStr;
 
@@ -277,25 +278,25 @@ impl TryFrom<(Principal, Principal, Account, Account, WithdrawRequest)>
             WithdrawRequest { withdraw_accounts },
         ) = value;
 
-        let (withdraw_account_0, withdraw_account_1) = if let Some(Accounts {
-            ledger_id_to_account,
-        }) = withdraw_accounts
-        {
-            let withdraw_account_0 = ledger_id_to_account
-                .get(&ledger_0)
-                .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_0))?;
+        let (withdraw_account_0, withdraw_account_1) =
+            if let Some(ledger_to_account) = withdraw_accounts {
+                let withdraw_account_0 = ledger_to_account.get(&ledger_0).ok_or(format!(
+                    "Withdraw account for ledger {} not found.",
+                    ledger_0
+                ))?;
 
-            let withdraw_account_1 = ledger_id_to_account
-                .get(&ledger_1)
-                .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_1))?;
+                let withdraw_account_1 = ledger_to_account.get(&ledger_1).ok_or(format!(
+                    "Withdraw account for ledger {} not found.",
+                    ledger_1
+                ))?;
 
-            (
-                account_into_icrc1_account(withdraw_account_0),
-                account_into_icrc1_account(withdraw_account_1),
-            )
-        } else {
-            (default_withdraw_account_0, default_withdraw_account_1)
-        };
+                (
+                    account_into_icrc1_account(withdraw_account_0),
+                    account_into_icrc1_account(withdraw_account_1),
+                )
+            } else {
+                (default_withdraw_account_0, default_withdraw_account_1)
+            };
 
         Ok(Self {
             withdraw_account_0,
@@ -531,17 +532,19 @@ impl From<ValidatedAllowance> for Allowance {
 #[derive(CandidType, Clone, Debug, Deserialize, PartialEq)]
 pub struct ValidatedBalance {
     pub amount_decimals: u64,
-    pub account: Option<Account>,
+    pub account: Account,
+    pub name: String,
 }
 
 impl From<ValidatedBalance> for Balance {
     fn from(value: ValidatedBalance) -> Self {
         Self {
             amount_decimals: Nat::from(value.amount_decimals),
-            account: value.account.map(|account| sns_treasury_manager::Account {
-                owner: account.owner,
-                subaccount: account.subaccount,
+            account: Some(sns_treasury_manager::Account {
+                owner: value.account.owner,
+                subaccount: value.account.subaccount,
             }),
+            name: Some(value.name.to_owned()),
         }
     }
 }
@@ -556,41 +559,109 @@ impl TryFrom<Balance> for ValidatedBalance {
             ));
         };
 
+        let Some(icrc1_account) = value
+            .account
+            .map(|account| account_into_icrc1_account(&account))
+        else {
+            return Err(format!("Owner account of the balance is not set"));
+        };
+
+        let Some(name) = value.name else {
+            return Err(format!("Name is not set"));
+        };
+
         Ok(Self {
             amount_decimals,
-            account: value
-                .account
-                .map(|account| account_into_icrc1_account(&account)),
+            account: icrc1_account,
+            name,
         })
     }
 }
 
-impl From<ValidatedBalancesForAsset> for BalancesForAsset {
-    fn from(value: ValidatedBalancesForAsset) -> Self {
+impl From<ValidatedBalanceBook> for BalanceBook {
+    fn from(value: ValidatedBalanceBook) -> Self {
         Self {
-            treasury_owner: Some(value.treasury_owner.clone()),
-            treasury_manager: Some(value.treasury_manager.clone()),
-            external: Some(value.external.clone()),
-            fee_collector: Some(value.fee_collector.clone()),
+            treasury_owner: Some(value.treasury_owner.clone().into()),
+            treasury_manager: Some(value.treasury_manager.clone().into()),
+            external: Some(Balance {
+                amount_decimals: Nat::from(value.external),
+                account: None,
+                name: None,
+            }),
+            fee_collector: Some(Balance {
+                amount_decimals: Nat::from(value.fee_collector),
+                account: None,
+                name: None,
+            }),
+            spendings: Some(Balance {
+                amount_decimals: Nat::from(value.spendings),
+                account: None,
+                name: None,
+            }),
+            earnings: Some(Balance {
+                amount_decimals: Nat::from(value.earnings),
+                account: None,
+                name: None,
+            }),
         }
     }
 }
 
 impl From<ValidatedBalances> for Balances {
     fn from(value: ValidatedBalances) -> Self {
-        let asset_to_balances = value
-            .asset_to_balances
-            .iter()
-            .map(|(validated_asset, validated_balance_for_asset)| {
-                let asset = Asset::from(validated_asset.clone());
-                let balance_for_asset = BalancesForAsset::from(validated_balance_for_asset.clone());
-                (asset, balance_for_asset)
-            })
-            .collect();
+        let asset_to_balances = Some(btreemap! {
+            Asset::from(value.asset_0) => BalanceBook::from(value.asset_0_balance),
+            Asset::from(value.asset_1) => BalanceBook::from(value.asset_1_balance),
+        });
 
         Self {
             timestamp_ns: value.timestamp_ns,
-            asset_to_balances: Some(asset_to_balances),
+            asset_to_balances,
         }
     }
 }
+
+// impl TryFrom<Balances> for ValidatedBalances {
+//     type Error = String;
+//
+//     fn try_from(value: Balances) -> Result<Self, Self::Error> {
+//         let Balances {
+//             timestamp_ns,
+//             asset_to_balances,
+//         } = value;
+//
+//         let Some(asset_to_balances) = asset_to_balances else {
+//             return Err(format!("No asset to balance mapping is set"));
+//         };
+//
+//         if asset_to_balances.len() != 2 {
+//             return Err(format!(
+//                 "Expected exactly two assets, got {}.",
+//                 asset_to_balances.len()
+//             ));
+//         }
+//
+//         let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
+//             asset_to_balances.iter().partition_map(
+//                 |(
+//                     _,
+//                     BalanceBook {
+//                         treasury_owner,
+//                         treasury_manager,
+//                         external,
+//                         fee_collector,
+//                         spendings,
+//                         earnings,
+//                     },
+//                 )| {
+//                     let owner_account = account_into_icrc1_account(owner_account);
+//                     match decode_nat_to_u64(amount_decimals.clone()) {
+//                         Ok(amount_decimals) => Either::Left((amount_decimals, owner_account)),
+//                         Err(err) => Either::Right(err),
+//                     }
+//                 },
+//             );
+//
+//         todo!()
+//     }
+// }

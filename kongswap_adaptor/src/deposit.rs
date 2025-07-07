@@ -1,11 +1,9 @@
 use crate::{
-    accounting::ValidatedBalances,
+    balances::ValidatedBalances,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs,
     },
-    log_err,
-    state::storage::ConfigState,
     validation::{saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -31,18 +29,20 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             let new_ledger_0 = allowance_0.asset.ledger_canister_id();
             let new_ledger_1 = allowance_1.asset.ledger_canister_id();
 
-            let old_assets = self.assets();
+            let (old_asset_0, old_asset_1) = self.assets();
 
-            if new_ledger_0 != old_assets[0].ledger_canister_id()
-                || new_ledger_1 != old_assets[1].ledger_canister_id()
+            if new_ledger_0 != old_asset_0.ledger_canister_id()
+                || new_ledger_1 != old_asset_1.ledger_canister_id()
             {
-                return Err(TransactionError::Precondition(format!(
+                return Err(TransactionError::Precondition{
+                    error: format!(
                     "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
-                    old_assets[0].symbol(),
-                    old_assets[1].symbol(),
+                    old_asset_0.symbol(),
+                    old_asset_1.symbol(),
                     new_ledger_0,
                     new_ledger_1,
-                )));
+                ),
+                code: 0});
             }
         }
 
@@ -150,20 +150,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         match result {
             // All used up, since the pool is brand new.
             Ok(_) => {
-                let balances = self.balances.with_borrow(|cell| {
-                    let ConfigState::Initialized(balances) = cell.get() else {
-                        log_err(&format!("Accounting doesn't exist. Make sure that you have initialised the canister correctly"));
-                        return ValidatedBalances::new();
-                    };
-
-                    balances.clone()
-                });
-
-                return Ok(balances);
+                return Ok(self.get_cached_balances());
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
-            Err(TransactionError::Backend(err)) if tolerated_errors.contains(&err) => (),
+            Err(TransactionError::Backend { error, .. }) if tolerated_errors.contains(&error) => (),
 
             Err(err) => {
                 return Err(err);
@@ -226,22 +217,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // @todo
         if original_amount_1 < amount_1 {
-            return Err(TransactionError::Backend(format!(
-                "Got top-up amount_1 = {} (must be at least {})",
-                original_amount_1, amount_1
-            )));
+            return Err(TransactionError::Backend {
+                error: format!(
+                    "Got top-up amount_1 = {} (must be at least {})",
+                    original_amount_1, amount_1
+                ),
+                code: 0,
+            });
         }
 
-        let balances = self.balances.with_borrow(|cell| {
-            let ConfigState::Initialized(balances) = cell.get() else {
-                log_err(&format!("Accounting doesn't exist. Make sure that you have initialised the canister correctly"));
-                return ValidatedBalances::new();
-            };
-
-            balances.clone()
-        });
-
-        Ok(balances)
+        Ok(self.get_cached_balances())
     }
 
     pub async fn deposit_impl(

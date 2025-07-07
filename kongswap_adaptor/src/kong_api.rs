@@ -13,8 +13,8 @@ use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn lp_token(&self) -> String {
-        let assets = self.assets();
-        format!("{}_{}", assets[0].symbol(), assets[1].symbol())
+        let (asset_0, asset_1) = self.assets();
+        format!("{}_{}", asset_0.symbol(), asset_1.symbol())
     }
 
     pub async fn maybe_add_token(
@@ -44,8 +44,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         match response {
             Ok(_) => Ok(()),
-            Err(TransactionError::Backend(err))
-                if err == format!("Token {} already exists", token) =>
+            Err(TransactionError::Backend { error, code: _ })
+                if error == format!("Token {} already exists", token) =>
             {
                 Ok(())
             }
@@ -91,19 +91,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         );
 
         if !errors.is_empty() {
-            return Err(TransactionError::Backend(format!(
-                "Failed to convert balances: {:?}",
-                errors.join(", ")
-            )));
+            return Err(TransactionError::Backend {
+                error: format!("Failed to convert balances: {:?}", errors.join(", ")),
+                code: 0,
+            });
         }
 
         let lp_token = self.lp_token();
 
         let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
-            return Err(TransactionError::Backend(format!(
-                "Failed to get LP balance for {}.",
-                lp_token
-            )));
+            return Err(TransactionError::Backend {
+                error: format!("Failed to get LP balance for {}.", lp_token),
+                code: 0,
+            });
         };
 
         Ok(balance)

@@ -1,5 +1,5 @@
 use crate::{
-    accounting::ValidatedBalances,
+    balances::ValidatedBalances,
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -17,11 +17,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."
                 .to_string();
 
-        let assets = self.assets();
+        let (asset_0, asset_1) = self.assets();
 
         let request = RemoveLiquidityArgs {
-            token_0: assets[0].symbol(),
-            token_1: assets[1].symbol(),
+            token_0: asset_0.symbol(),
+            token_1: asset_1.symbol(),
             remove_lp_token_amount,
         };
 
@@ -41,10 +41,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .map(|claim_id| claim_id.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(vec![TransactionError::Backend(format!(
-                "Withdrawal from DEX might not be complete, returned claims: {}.",
-                claim_ids
-            ))]);
+            return Err(vec![TransactionError::Backend {
+                error: format!(
+                    "Withdrawal from DEX might not be complete, returned claims: {}.",
+                    claim_ids
+                ),
+                code: 0,
+            }]);
         }
 
         Ok(())

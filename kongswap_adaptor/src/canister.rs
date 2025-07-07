@@ -1,4 +1,4 @@
-use crate::state::storage::{ConfigState, StableOwnerAccount, StableTransaction};
+use crate::state::storage::{ConfigState, StableTransaction};
 use crate::validation::{
     ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
@@ -18,7 +18,6 @@ use sns_treasury_manager::{
 use state::KongSwapAdaptor;
 use std::{cell::RefCell, time::Duration};
 
-mod accounting;
 mod balances;
 mod deposit;
 mod emit_transaction;
@@ -35,7 +34,6 @@ const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // o
 pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;
 pub(crate) type StableAuditTrail = StableVec<StableTransaction, Memory>;
 pub(crate) type StableBalances = StableCell<ConfigState, Memory>;
-pub(crate) type StableOwnerAccounts = StableVec<StableOwnerAccount, Memory>;
 
 // Canister ID from the mainnet.
 // See https://dashboard.internetcomputer.org/canister/2ipq2-uqaaa-aaaar-qailq-cai
@@ -48,7 +46,6 @@ lazy_static! {
 
 const BALANCES_MEMORY_ID: MemoryId = MemoryId::new(0);
 const AUDIT_TRAIL_MEMORY_ID: MemoryId = MemoryId::new(1);
-const OWNER_ACCOUNTS_MEMORY_ID: MemoryId = MemoryId::new(2);
 
 thread_local! {
     static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
@@ -75,19 +72,10 @@ thread_local! {
             )
         );
 
-    static OWNER_ACCOUNTS: RefCell<StableOwnerAccounts> =
-        MEMORY_MANAGER.with(|memory_manager|
-            RefCell::new(
-                StableVec::init(
-                    memory_manager.borrow().get(OWNER_ACCOUNTS_MEMORY_ID)
-                )
-                .expect("OWNER_ACCOUNTS init should not cause errors")
-            )
-        );
 }
 
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
-    KongSwapAdaptor::new(CdkAgent::new(), &BALANCES, &AUDIT_TRAIL, &OWNER_ACCOUNTS)
+    KongSwapAdaptor::new(CdkAgent::new(), &BALANCES, &AUDIT_TRAIL)
 }
 
 fn check_access() {
@@ -118,22 +106,27 @@ fn log(msg: &str) {
 
 impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
-        let ledgers = self.ledgers();
+        let (ledger_0, ledger_1) = self.ledgers();
 
-        let default_owners = self.owner_accounts();
+        let (default_owner_0, default_owner_1) = self.owner_accounts();
 
         let ValidatedWithdrawRequest {
             withdraw_account_0,
             withdraw_account_1,
         } = (
-            ledgers[0],
-            ledgers[1],
-            default_owners[0],
-            default_owners[1],
+            ledger_0,
+            ledger_1,
+            default_owner_0,
+            default_owner_1,
             request,
         )
             .try_into()
-            .map_err(|err| vec![TransactionError::Precondition(err)])?;
+            .map_err(|err| {
+                vec![TransactionError::Precondition {
+                    error: err,
+                    code: 0,
+                }]
+            })?;
 
         let returned_amounts = self
             .withdraw_impl(withdraw_account_0, withdraw_account_1)
@@ -147,9 +140,12 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request
-            .try_into()
-            .map_err(|err| vec![TransactionError::Precondition(err)])?;
+        } = request.try_into().map_err(|err| {
+            vec![TransactionError::Precondition {
+                error: err,
+                code: 0,
+            }]
+        })?;
 
         let deposited_amounts = self
             .deposit_impl(allowance_0, allowance_1)
@@ -287,8 +283,10 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .expect("Failed to validate TreasuryManagerInit.");
 
     canister_state().initialize(
-        vec![allowance_0.asset, allowance_1.asset],
-        vec![allowance_0.owner_account, allowance_1.owner_account],
+        allowance_0.asset,
+        allowance_1.asset,
+        allowance_0.owner_account,
+        allowance_1.owner_account,
     );
 
     init_periodic_tasks();
