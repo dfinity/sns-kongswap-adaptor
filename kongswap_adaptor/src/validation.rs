@@ -1,11 +1,13 @@
-use crate::{log, log_err, ICP_LEDGER_CANISTER_ID};
+use crate::{
+    balances::{ValidatedBalanceBook, ValidatedBalances},
+    ICP_LEDGER_CANISTER_ID,
+};
 use candid::{CandidType, Nat, Principal};
 use icrc_ledger_types::icrc1::account::Account;
-use itertools::{Either, Itertools};
 use maplit::btreemap;
 use serde::Deserialize;
 use sns_treasury_manager::{
-    self, Accounts, Allowance, Asset, Balance, Balances, DepositRequest, TreasuryManagerInit,
+    self, Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManagerInit,
     WithdrawRequest,
 };
 use std::str::FromStr;
@@ -268,6 +270,8 @@ impl TryFrom<(Principal, Principal, Account, Account, WithdrawRequest)>
     fn try_from(
         value: (Principal, Principal, Account, Account, WithdrawRequest),
     ) -> Result<Self, Self::Error> {
+        let mut errors = vec![];
+
         let (
             ledger_0,
             ledger_1,
@@ -276,25 +280,36 @@ impl TryFrom<(Principal, Principal, Account, Account, WithdrawRequest)>
             WithdrawRequest { withdraw_accounts },
         ) = value;
 
-        let (withdraw_account_0, withdraw_account_1) = if let Some(Accounts {
-            ledger_id_to_account,
-        }) = withdraw_accounts
-        {
-            let withdraw_account_0 = ledger_id_to_account
-                .get(&ledger_0)
-                .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_0))?;
+        let (withdraw_account_0, withdraw_account_1) =
+            if let Some(ledger_to_account) = withdraw_accounts {
+                if ledger_to_account.get(&ledger_0).is_none() {
+                    errors.push(format!(
+                        "Withdraw account for ledger {} not found.",
+                        ledger_0
+                    ));
+                }
 
-            let withdraw_account_1 = ledger_id_to_account
-                .get(&ledger_1)
-                .ok_or_else(|| format!("Withdraw account for ledger {} not found.", ledger_1))?;
+                if ledger_to_account.get(&ledger_1).is_none() {
+                    errors.push(format!(
+                        "Withdraw account for ledger {} not found.",
+                        ledger_1
+                    ));
+                }
 
-            (
-                account_into_icrc1_account(withdraw_account_0),
-                account_into_icrc1_account(withdraw_account_1),
-            )
-        } else {
-            (default_withdraw_account_0, default_withdraw_account_1)
-        };
+                if !errors.is_empty() {
+                    return Err(errors.join(", "));
+                }
+
+                let withdraw_account_0 = ledger_to_account.get(&ledger_0).unwrap();
+                let withdraw_account_1 = ledger_to_account.get(&ledger_1).unwrap();
+
+                (
+                    account_into_icrc1_account(withdraw_account_0),
+                    account_into_icrc1_account(withdraw_account_1),
+                )
+            } else {
+                (default_withdraw_account_0, default_withdraw_account_1)
+            };
 
         Ok(Self {
             withdraw_account_0,
@@ -527,200 +542,102 @@ impl From<ValidatedAllowance> for Allowance {
     }
 }
 
-#[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct ValidatedBalances {
-    pub timestamp_ns: u64,
-
-    pub asset_0: ValidatedAsset,
-    pub asset_1: ValidatedAsset,
-    pub balance_0_decimals: u64,
-    pub balance_1_decimals: u64,
-
-    pub owner_account_0: Account,
-    pub owner_account_1: Account,
+#[derive(CandidType, Clone, Debug, Deserialize, PartialEq)]
+pub struct ValidatedBalance {
+    pub amount_decimals: u64,
+    pub account: Account,
+    pub name: String,
 }
 
-impl ValidatedBalances {
-    pub fn new(
-        asset_0: ValidatedAsset,
-        asset_1: ValidatedAsset,
-        balance_0_decimals: u64,
-        balance_1_decimals: u64,
-        owner_account_0: Account,
-        owner_account_1: Account,
-    ) -> Self {
+impl From<ValidatedBalance> for Balance {
+    fn from(value: ValidatedBalance) -> Self {
         Self {
-            timestamp_ns: ic_cdk::api::time(),
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
+            amount_decimals: Nat::from(value.amount_decimals),
+            account: Some(sns_treasury_manager::Account {
+                owner: value.account.owner,
+                subaccount: value.account.subaccount,
+            }),
+            name: Some(value.name.to_owned()),
         }
     }
+}
 
-    pub fn new_with_zero_balances(
-        asset_0: ValidatedAsset,
-        asset_1: ValidatedAsset,
-        owner_account_0: Account,
-        owner_account_1: Account,
-    ) -> Self {
-        Self {
-            timestamp_ns: ic_cdk::api::time(),
-            balance_0_decimals: 0,
-            balance_1_decimals: 0,
-            asset_0,
-            asset_1,
-            owner_account_0,
-            owner_account_1,
-        }
-    }
+impl TryFrom<Balance> for ValidatedBalance {
+    type Error = String;
+    fn try_from(value: Balance) -> Result<Self, Self::Error> {
+        let mut errors = vec![];
 
-    pub fn set(&mut self, balance_0_decimals: u64, balance_1_decimals: u64, timestamp_ns: u64) {
-        self.balance_0_decimals = balance_0_decimals;
-        self.balance_1_decimals = balance_1_decimals;
-        self.timestamp_ns = timestamp_ns;
-    }
-
-    /// Refreshes the asset with the given `asset_id` (0 or 1) with a new asset.
-    ///
-    /// Returns whether the asset was changed.
-    pub fn refresh_asset(&mut self, asset_id: usize, new_asset: ValidatedAsset) {
-        let asset = if asset_id == 0 {
-            &mut self.asset_0
-        } else if asset_id == 1 {
-            &mut self.asset_1
-        } else {
-            log_err(&format!("Invalid asset_id {}: must be 0 or 1.", asset_id));
-            return;
+        let amount_decimals_result = decode_nat_to_u64(value.amount_decimals.clone());
+        if amount_decimals_result.is_err() {
+            errors.push(format!(
+                "Failed to convert amount {} to u64",
+                value.amount_decimals
+            ));
         };
 
-        let old_asset = asset.clone();
+        let icrc1_account = value
+            .account
+            .map(|account| account_into_icrc1_account(&account));
 
-        let ValidatedAsset::Token {
-            symbol: new_symbol,
-            ledger_fee_decimals: new_ledger_fee_decimals,
-            ledger_canister_id: _,
-        } = new_asset;
+        if icrc1_account.is_none() {
+            errors.push(format!("Owner account of the balance is not set"));
+        };
 
-        if asset.set_symbol(new_symbol) {
-            log(&format!(
-                "Changed asset_{} symbol from `{}` to `{}`.",
-                asset_id,
-                old_asset.symbol(),
-                new_symbol,
-            ));
+        if value.name.is_none() {
+            errors.push(format!("Name is not set"));
+        };
+
+        if !errors.is_empty() {
+            return Err(errors.join(", "));
         }
 
-        if asset.set_ledger_fee_decimals(new_ledger_fee_decimals) {
-            log(&format!(
-                "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
-                asset_id,
-                old_asset.ledger_fee_decimals(),
-                new_ledger_fee_decimals,
-            ));
+        Ok(Self {
+            amount_decimals: amount_decimals_result.unwrap(),
+            account: icrc1_account.unwrap(),
+            name: value.name.unwrap(),
+        })
+    }
+}
+
+impl From<ValidatedBalanceBook> for BalanceBook {
+    fn from(value: ValidatedBalanceBook) -> Self {
+        Self {
+            treasury_owner: Some(value.treasury_owner.clone().into()),
+            treasury_manager: Some(value.treasury_manager.clone().into()),
+            external: Some(Balance {
+                amount_decimals: Nat::from(value.external),
+                account: None,
+                name: None,
+            }),
+            fee_collector: Some(Balance {
+                amount_decimals: Nat::from(value.fee_collector),
+                account: None,
+                name: None,
+            }),
+            spendings: Some(Balance {
+                amount_decimals: Nat::from(value.spendings),
+                account: None,
+                name: None,
+            }),
+            earnings: Some(Balance {
+                amount_decimals: Nat::from(value.earnings),
+                account: None,
+                name: None,
+            }),
         }
     }
 }
 
 impl From<ValidatedBalances> for Balances {
     fn from(value: ValidatedBalances) -> Self {
-        let ValidatedBalances {
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
-            timestamp_ns,
-        } = value;
+        let asset_to_balances = Some(btreemap! {
+            Asset::from(value.asset_0) => BalanceBook::from(value.asset_0_balance),
+            Asset::from(value.asset_1) => BalanceBook::from(value.asset_1_balance),
+        });
 
-        let token_0 = Asset::from(asset_0);
-        let token_1 = Asset::from(asset_1);
-
-        let balances = btreemap! {
-            token_0 => Balance {
-                amount_decimals: Nat::from(balance_0_decimals),
-                owner_account: icrc1_account_into_account(&owner_account_0),
-            },
-            token_1 => Balance {
-                amount_decimals: Nat::from(balance_1_decimals),
-                owner_account: icrc1_account_into_account(&owner_account_1),
-            },
-        };
-
-        Balances {
-            balances,
-            timestamp_ns,
+        Self {
+            timestamp_ns: value.timestamp_ns,
+            asset_to_balances,
         }
-    }
-}
-
-impl TryFrom<Balances> for ValidatedBalances {
-    type Error = String;
-
-    fn try_from(value: Balances) -> Result<Self, Self::Error> {
-        let Balances {
-            balances,
-            timestamp_ns,
-        } = value;
-
-        if balances.len() != 2 {
-            return Err(format!(
-                "Expected exactly two balances, got {}.",
-                balances.len()
-            ));
-        }
-
-        let (amount_decimals_owner_account_vec, amount_errors): (Vec<_>, Vec<_>) =
-            balances.iter().partition_map(
-                |(
-                    _,
-                    Balance {
-                        amount_decimals,
-                        owner_account,
-                    },
-                )| {
-                    let owner_account = account_into_icrc1_account(owner_account);
-                    match decode_nat_to_u64(amount_decimals.clone()) {
-                        Ok(amount_decimals) => Either::Left((amount_decimals, owner_account)),
-                        Err(err) => Either::Right(err),
-                    }
-                },
-            );
-
-        let (assets, asset_errors): (Vec<_>, Vec<_>) =
-            balances.iter().partition_map(|(asset, _)| {
-                match ValidatedAsset::try_from(asset.clone()) {
-                    Ok(asset) => Either::Left(asset),
-                    Err(err) => Either::Right(err),
-                }
-            });
-
-        if amount_errors.len() > 0 || asset_errors.len() > 0 {
-            let amount_errors = amount_errors.join(", ");
-            let asset_errors = asset_errors.join(", ");
-            return Err(format!(
-                "Failed to validate balances:\n amount errors:\n {}; asset errors: {}.",
-                amount_errors, asset_errors,
-            ));
-        }
-
-        let (asset_0, asset_1) = validate_assets(assets)?;
-
-        // Safe due to the previous validation that ensures exactly two balances and zero errors.
-        let (balance_0_decimals, owner_account_0) = amount_decimals_owner_account_vec[0];
-        let (balance_1_decimals, owner_account_1) = amount_decimals_owner_account_vec[1];
-
-        Ok(Self {
-            timestamp_ns,
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
-        })
     }
 }

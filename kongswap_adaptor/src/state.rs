@@ -1,7 +1,5 @@
 use crate::{
-    log_err,
-    state::storage::ConfigState,
-    validation::{ValidatedAsset, ValidatedBalances},
+    balances::ValidatedBalances, log_err, state::storage::ConfigState, validation::ValidatedAsset,
     StableAuditTrail, StableBalances,
 };
 use candid::Principal;
@@ -36,11 +34,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             let ConfigState::Initialized(balances) = balances.get() else {
                 ic_cdk::trap("BUG: Balances should be initialized");
             };
-            *balances
+            balances.clone()
         })
     }
 
-    pub fn initialize(&self, init_balances: ValidatedBalances) {
+    pub fn initialize(
+        &self,
+        asset_0: ValidatedAsset,
+        asset_1: ValidatedAsset,
+        owner_account_0: Account,
+        owner_account_1: Account,
+    ) {
         self.balances.with_borrow_mut(|cell| {
             if let ConfigState::Initialized(balances) = cell.get() {
                 log_err(&format!(
@@ -49,7 +53,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ));
             }
 
-            if let Err(err) = cell.set(ConfigState::Initialized(init_balances)) {
+            let validated_balances =
+                ValidatedBalances::new(asset_0, asset_1, owner_account_0, owner_account_1);
+
+            if let Err(err) = cell.set(ConfigState::Initialized(validated_balances)) {
                 log_err(&format!("Failed to initialize balances: {:?}", err));
             }
         });
@@ -76,13 +83,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub fn assets(&self) -> (ValidatedAsset, ValidatedAsset) {
-        let balances = self.get_cached_balances();
-        (balances.asset_0, balances.asset_1)
+        let validated_balances = self.get_cached_balances();
+        (validated_balances.asset_0, validated_balances.asset_1)
     }
 
     pub fn owner_accounts(&self) -> (Account, Account) {
-        let balances = self.get_cached_balances();
-        (balances.owner_account_0, balances.owner_account_1)
+        let validated_balances = self.get_cached_balances();
+        (
+            validated_balances.asset_0_balance.treasury_owner.account,
+            validated_balances.asset_1_balance.treasury_owner.account,
+        )
     }
 
     pub fn ledgers(&self) -> (Principal, Principal) {
@@ -90,14 +100,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         (
             balances.asset_0.ledger_canister_id(),
             balances.asset_1.ledger_canister_id(),
-        )
-    }
-
-    pub fn fees(&self) -> (u64, u64) {
-        let balances = self.get_cached_balances();
-        (
-            balances.asset_0.ledger_fee_decimals(),
-            balances.asset_1.ledger_fee_decimals(),
         )
     }
 }

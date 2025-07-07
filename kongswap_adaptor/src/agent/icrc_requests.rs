@@ -63,6 +63,8 @@ impl Request for TransferArg {
             ledger_canister_id,
             amount_decimals,
             block_index: block_index.clone(),
+            sender: None,
+            receiver: None,
         }]);
 
         Ok((witness, block_index))
@@ -96,6 +98,8 @@ impl Request for ApproveArgs {
             ledger_canister_id,
             amount_decimals,
             block_index: block_index.clone(),
+            sender: None,
+            receiver: None,
         }]);
 
         Ok((witness, block_index))

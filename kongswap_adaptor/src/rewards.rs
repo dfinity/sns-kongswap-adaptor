@@ -1,4 +1,4 @@
-use crate::{state::KongSwapAdaptor, validation::ValidatedBalances};
+use crate::{balances::ValidatedBalances, state::KongSwapAdaptor};
 use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
@@ -10,7 +10,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let returned_amounts = self
             .return_remaining_assets_to_owner(
-                TreasuryManagerOperation::IssueReward,
+                TreasuryManagerOperation::new(sns_treasury_manager::Operation::IssueReward),
                 withdraw_account_0,
                 withdraw_account_1,
             )

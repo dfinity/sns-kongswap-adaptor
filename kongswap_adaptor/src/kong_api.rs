@@ -3,11 +3,10 @@ use crate::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
-    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
+    tx_error_codes::TransactionErrorCodes,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::{Nat, Principal};
-use icrc_ledger_types::icrc1::account::Account;
 use itertools::{Either, Itertools};
 use kongswap_adaptor::agent::AbstractAgent;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
@@ -46,8 +45,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         match response {
             Ok(_) => Ok(()),
-            Err(TransactionError::Backend(err))
-                if err == format!("Token {} already exists", token) =>
+            Err(TransactionError::Backend { error, code: _ })
+                if error == format!("Token {} already exists", token) =>
             {
                 Ok(())
             }
@@ -93,55 +92,21 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         );
 
         if !errors.is_empty() {
-            return Err(TransactionError::Backend(format!(
-                "Failed to convert balances: {:?}",
-                errors.join(", ")
-            )));
+            return Err(TransactionError::Backend {
+                error: format!("Failed to convert balances: {:?}", errors.join(", ")),
+                code: u64::from(TransactionErrorCodes::BackendCode),
+            });
         }
 
         let lp_token = self.lp_token();
 
         let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
-            return Err(TransactionError::Backend(format!(
-                "Failed to get LP balance for {}.",
-                lp_token
-            )));
+            return Err(TransactionError::Backend {
+                error: format!("Failed to get LP balance for {}.", lp_token),
+                code: u64::from(TransactionErrorCodes::BackendCode),
+            });
         };
 
         Ok(balance)
-    }
-
-    pub(crate) fn reply_params_to_result(
-        &self,
-        symbol_0: String,
-        address_0: String,
-        amount_0: Nat,
-        owner_account_0: Account,
-        symbol_1: String,
-        amount_1: Nat,
-        address_1: String,
-        owner_account_1: Account,
-    ) -> Result<ValidatedBalances, TransactionError> {
-        let (fee_0, fee_1) = self.fees();
-
-        let asset_0 = ValidatedAsset::try_from((symbol_0, address_0, fee_0))
-            .map_err(TransactionError::Postcondition)?;
-
-        let asset_1 = ValidatedAsset::try_from((symbol_1, address_1, fee_1))
-            .map_err(TransactionError::Postcondition)?;
-
-        let balance_0_decimals =
-            decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
-        let balance_1_decimals =
-            decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
-
-        Ok(ValidatedBalances::new(
-            asset_0,
-            asset_1,
-            balance_0_decimals,
-            balance_1_decimals,
-            owner_account_0,
-            owner_account_1,
-        ))
     }
 }

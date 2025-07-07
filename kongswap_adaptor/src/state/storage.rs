@@ -1,4 +1,3 @@
-use crate::validation::ValidatedBalances;
 use candid::{CandidType, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
 use serde::Deserialize;
@@ -6,6 +5,8 @@ use sns_treasury_manager::{
     Transaction, TransactionError, TransactionWitness, TreasuryManagerOperation,
 };
 use std::borrow::Cow;
+
+use crate::balances::ValidatedBalances;
 
 /// Configuration state of the KongSwapAdaptor canister (exclusing the `audit_trail`).
 #[derive(CandidType, Default, Deserialize)]
@@ -64,7 +65,7 @@ impl From<StableTransaction> for Transaction {
             timestamp_ns: item.timestamp_ns,
             canister_id: item.canister_id,
             result: item.result,
-            human_readable: item.human_readable,
+            purpose: item.human_readable,
             treasury_manager_operation: item.treasury_manager_operation,
         }
     }
@@ -76,7 +77,7 @@ impl From<Transaction> for StableTransaction {
             timestamp_ns: item.timestamp_ns,
             canister_id: item.canister_id,
             result: item.result,
-            human_readable: item.human_readable,
+            human_readable: item.purpose,
             treasury_manager_operation: item.treasury_manager_operation,
         }
     }

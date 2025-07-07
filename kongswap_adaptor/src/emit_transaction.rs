@@ -1,6 +1,7 @@
 use crate::{
     log_err,
     state::{storage::StableTransaction, KongSwapAdaptor},
+    tx_error_codes::TransactionErrorCodes,
     StableAuditTrail,
 };
 use candid::Principal;
@@ -27,6 +28,7 @@ where
             method: request.method().to_string(),
             error: error.to_string(),
             canister_id,
+            code: u64::from(TransactionErrorCodes::CallFailedCode),
         });
 
     let (result, function_output) = match call_result {
@@ -34,7 +36,10 @@ where
         Ok(response) => {
             let res = request
                 .transaction_witness(canister_id, response)
-                .map_err(|err| TransactionError::Backend(err.to_string()));
+                .map_err(|err| TransactionError::Backend {
+                    error: err.to_string(),
+                    code: u64::from(TransactionErrorCodes::BackendCode),
+                });
 
             match res {
                 Err(err) => (Err(err.clone()), Err(err)),

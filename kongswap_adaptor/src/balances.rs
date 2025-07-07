@@ -1,12 +1,89 @@
 use crate::{
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log_err,
-    validation::{decode_nat_to_u64, ValidatedBalances, ValidatedSymbol},
+    tx_error_codes::TransactionErrorCodes,
+    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalance, ValidatedSymbol},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
-use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
+use candid::{CandidType, Principal};
+use icrc_ledger_types::{icrc::generic_metadata_value::MetadataValue, icrc1::account::Account};
 use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent};
+use serde::Deserialize;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+
+#[derive(CandidType, Deserialize, Clone)]
+pub(crate) struct ValidatedBalanceBook {
+    pub treasury_owner: ValidatedBalance,
+    pub treasury_manager: ValidatedBalance,
+    pub external: u64,
+    pub fee_collector: u64,
+    pub spendings: u64,
+    pub earnings: u64,
+}
+
+#[derive(CandidType, Deserialize, Clone)]
+pub(crate) struct ValidatedBalances {
+    pub timestamp_ns: u64,
+    pub asset_0: ValidatedAsset,
+    pub asset_1: ValidatedAsset,
+    pub asset_0_balance: ValidatedBalanceBook,
+    pub asset_1_balance: ValidatedBalanceBook,
+}
+
+impl From<(ValidatedAsset, Principal)> for ValidatedBalance {
+    fn from(value: (ValidatedAsset, Principal)) -> Self {
+        Self {
+            amount_decimals: 0,
+            account: Account {
+                owner: value.1,
+                subaccount: None,
+            },
+            name: value.0.symbol(),
+        }
+    }
+}
+
+impl ValidatedBalances {
+    pub(crate) fn new(
+        asset_0: ValidatedAsset,
+        asset_1: ValidatedAsset,
+        owner_account_0: Account,
+        owner_account_1: Account,
+    ) -> Self {
+        let asset_0_balance = ValidatedBalanceBook {
+            treasury_owner: ValidatedBalance::from((asset_0, owner_account_0.owner)),
+            treasury_manager: ValidatedBalance::from((asset_0, ic_cdk::id())),
+            external: 0,
+            fee_collector: 0,
+            spendings: 0,
+            earnings: 0,
+        };
+        let asset_1_balance = ValidatedBalanceBook {
+            treasury_owner: ValidatedBalance::from((asset_1, owner_account_1.owner)),
+            treasury_manager: ValidatedBalance::from((asset_1, ic_cdk::id())),
+            external: 0,
+            fee_collector: 0,
+            spendings: 0,
+            earnings: 0,
+        };
+
+        Self {
+            timestamp_ns: ic_cdk::api::time(),
+            asset_0,
+            asset_1,
+            asset_0_balance,
+            asset_1_balance,
+        }
+    }
+
+    // As the metadata of an asset, e.g., its symbol and fee, might change over time,
+    // calling this function would update them.
+    pub(crate) fn refresh_asset(&mut self, _asset_id: usize, _asset: &ValidatedAsset) {}
+
+    // This function updates the distribution of balances for a given asset
+    // over all parties (treasury owner, manager, external, ...)
+    pub(crate) fn refresh_balances(&mut self, _asset: &ValidatedAsset, _balance: u64) {}
+}
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
@@ -72,10 +149,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             });
 
             let Some(MetadataValue::Text(new_symbol)) = new_symbol else {
-                return Err(TransactionError::Postcondition(format!(
-                    "Ledger {} icrc1_metadata response does not have an `icrc1:symbol`.",
-                    ledger_canister_id
-                )));
+                return Err(TransactionError::Postcondition {
+                    error: format!(
+                        "Ledger {} icrc1_metadata response does not have an `icrc1:symbol`.",
+                        ledger_canister_id
+                    ),
+                    code: u64::from(TransactionErrorCodes::PostConditionCode),
+                });
             };
 
             match ValidatedSymbol::try_from(new_symbol) {
@@ -101,10 +181,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             });
 
             let Some(MetadataValue::Nat(new_fee)) = new_fee else {
-                return Err(TransactionError::Postcondition(format!(
-                    "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
-                    ledger_canister_id
-                )));
+                return Err(TransactionError::Postcondition {
+                    error: format!(
+                        "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
+                        ledger_canister_id
+                    ),
+                    code: u64::from(TransactionErrorCodes::PostConditionCode),
+                });
             };
 
             match decode_nat_to_u64(new_fee) {
@@ -120,8 +203,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 }
             }
 
-            self.with_balances_mut(|balances| {
-                balances.refresh_asset(asset_id, asset);
+            self.with_balances_mut(|validated_balances| {
+                validated_balances.refresh_asset(asset_id, &asset);
             });
         }
 
@@ -129,7 +212,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
-        let operation = TreasuryManagerOperation::Balances;
+        let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
 
         if let Err(err) = self.refresh_ledger_metadata(operation).await {
             log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
@@ -164,12 +247,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         } = reply;
 
         let balance_0_decimals =
-            decode_nat_to_u64(amount_0).map_err(TransactionError::Postcondition)?;
+            decode_nat_to_u64(amount_0).map_err(|err| TransactionError::Postcondition {
+                error: err,
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+            })?;
         let balance_1_decimals =
-            decode_nat_to_u64(amount_1).map_err(TransactionError::Postcondition)?;
+            decode_nat_to_u64(amount_1).map_err(|err| TransactionError::Postcondition {
+                error: err,
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+            })?;
 
-        self.with_balances_mut(|balances| {
-            balances.set(balance_0_decimals, balance_1_decimals, ic_cdk::api::time());
+        self.with_balances_mut(|validated_balances| {
+            for (asset, &balance) in [asset_0, asset_1]
+                .iter()
+                .zip([balance_0_decimals, balance_1_decimals].iter())
+            {
+                validated_balances.refresh_balances(asset, balance);
+            }
         });
 
         Ok(self.get_cached_balances())

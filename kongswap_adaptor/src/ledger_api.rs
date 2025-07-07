@@ -1,6 +1,8 @@
 use crate::{
+    balances::ValidatedBalances,
     state::KongSwapAdaptor,
-    validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalances},
+    tx_error_codes::TransactionErrorCodes,
+    validation::{decode_nat_to_u64, ValidatedAsset},
 };
 use candid::Nat;
 use icrc_ledger_types::icrc1::{
@@ -33,8 +35,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .emit_transaction(ledger_canister_id, request, operation, human_readable)
             .await?;
 
-        let balance_decimals =
-            decode_nat_to_u64(balance_decimals).map_err(TransactionError::Postcondition)?;
+        let balance_decimals = decode_nat_to_u64(balance_decimals).map_err(|error| {
+            TransactionError::Postcondition {
+                error,
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+            }
+        })?;
 
         Ok(balance_decimals)
     }
@@ -122,16 +128,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        let returned_amounts = ValidatedBalances {
-            timestamp_ns: ic_cdk::api::time(),
-            asset_0,
-            asset_1,
-            balance_0_decimals: return_amount_0_decimals,
-            balance_1_decimals: return_amount_1_decimals,
-            owner_account_0: withdraw_account_0,
-            owner_account_1: withdraw_account_1,
-        };
-
-        Ok(returned_amounts)
+        Ok(self.get_cached_balances())
     }
 }

@@ -1,5 +1,5 @@
 use crate::state::storage::{ConfigState, StableTransaction};
-use crate::validation::ValidatedBalances;
+use crate::tx_error_codes::TransactionErrorCodes;
 use crate::validation::{
     ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
@@ -27,6 +27,7 @@ mod kong_types;
 mod ledger_api;
 mod rewards;
 mod state;
+mod tx_error_codes;
 mod validation;
 mod withdraw;
 
@@ -72,6 +73,7 @@ thread_local! {
                 .expect("AUDIT_TRAIL init should not cause errors")
             )
         );
+
 }
 
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
@@ -108,7 +110,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
         let (ledger_0, ledger_1) = self.ledgers();
 
-        let (default_withdraw_account_0, default_withdraw_account_1) = self.owner_accounts();
+        let (default_owner_0, default_owner_1) = self.owner_accounts();
 
         let ValidatedWithdrawRequest {
             withdraw_account_0,
@@ -116,12 +118,17 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         } = (
             ledger_0,
             ledger_1,
-            default_withdraw_account_0,
-            default_withdraw_account_1,
+            default_owner_0,
+            default_owner_1,
             request,
         )
             .try_into()
-            .map_err(|err| vec![TransactionError::Precondition(err)])?;
+            .map_err(|err| {
+                vec![TransactionError::Precondition {
+                    error: err,
+                    code: u64::from(TransactionErrorCodes::PreConditionCode),
+                }]
+            })?;
 
         let returned_amounts = self
             .withdraw_impl(withdraw_account_0, withdraw_account_1)
@@ -135,9 +142,12 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request
-            .try_into()
-            .map_err(|err| vec![TransactionError::Precondition(err)])?;
+        } = request.try_into().map_err(|err| {
+            vec![TransactionError::Precondition {
+                error: err,
+                code: u64::from(TransactionErrorCodes::PreConditionCode),
+            }]
+        })?;
 
         let deposited_amounts = self
             .deposit_impl(allowance_0, allowance_1)
@@ -274,14 +284,12 @@ async fn canister_init(arg: TreasuryManagerArg) {
         .try_into()
         .expect("Failed to validate TreasuryManagerInit.");
 
-    let init_balances = ValidatedBalances::new_with_zero_balances(
+    canister_state().initialize(
         allowance_0.asset,
         allowance_1.asset,
         allowance_0.owner_account,
         allowance_1.owner_account,
     );
-
-    canister_state().initialize(init_balances);
 
     init_periodic_tasks();
 
