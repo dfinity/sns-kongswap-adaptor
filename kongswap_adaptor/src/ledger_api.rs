@@ -21,7 +21,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_canister_id = asset.ledger_canister_id();
 
         let request = Account {
-            owner: ic_cdk::api::id(),
+            owner: self.id,
             subaccount: None,
         };
 

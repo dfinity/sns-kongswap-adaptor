@@ -64,7 +64,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .emit_transaction(
                 *KONG_BACKEND_CANISTER_ID,
                 ClaimsArgs {
-                    principal_id: ic_cdk::api::id().to_string(),
+                    principal_id: self.id.to_string(),
                 },
                 operation,
                 human_readable,

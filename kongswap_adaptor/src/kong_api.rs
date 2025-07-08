@@ -59,7 +59,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         operation: TreasuryManagerOperation,
     ) -> Result<Nat, TransactionError> {
         let request = UserBalancesArgs {
-            principal_id: ic_cdk::api::id().to_string(),
+            principal_id: self.id.to_string(),
         };
 
         let human_readable =

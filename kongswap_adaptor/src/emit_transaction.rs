@@ -6,6 +6,7 @@ use crate::{
 };
 use candid::Principal;
 use kongswap_adaptor::agent::{AbstractAgent, Request};
+use kongswap_adaptor::requests::CommitStateRequest;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 use std::{cell::RefCell, thread::LocalKey};
 
@@ -13,6 +14,7 @@ use std::{cell::RefCell, thread::LocalKey};
 async fn emit_transaction<R>(
     audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
     agent: &impl AbstractAgent,
+    self_canister_id: Principal,
     canister_id: Principal,
     request: R,
     treasury_manager_operation: TreasuryManagerOperation,
@@ -65,6 +67,16 @@ where
         }
     });
 
+    // Self-call to ensure that the state has been committed, to prevent state roll back in case
+    // of a panic that occurs before the next (meaningful) async operation. This is recommended:
+    // https://internetcomputer.org/docs/building-apps/security/inter-canister-calls#journaling
+    if let Err(err) = agent.call(self_canister_id, CommitStateRequest {}).await {
+        log_err(&format!(
+            "Failed to commit state after emitting transaction: {}",
+            err
+        ));
+    }
+
     function_output
 }
 
@@ -82,6 +94,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         emit_transaction(
             self.audit_trail,
             &self.agent,
+            self.id,
             canister_id,
             request,
             treasury_manager_operation,

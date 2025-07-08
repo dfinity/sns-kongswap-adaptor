@@ -91,3 +91,27 @@ impl Request for AuditTrailRequest {
         unimplemented!()
     }
 }
+
+pub struct CommitStateRequest {}
+
+impl Request for CommitStateRequest {
+    fn method(&self) -> &'static str {
+        "commit_state"
+    }
+
+    fn payload(&self) -> Result<Vec<u8>, candid::Error> {
+        Ok(candid::encode_one(&()).unwrap())
+    }
+
+    type Response = ();
+
+    type Ok = ();
+
+    fn transaction_witness(
+        &self,
+        _canister_id: candid::Principal,
+        _response: Self::Response,
+    ) -> Result<(sns_treasury_manager::TransactionWitness, Self::Ok), String> {
+        Err("CommitStateRequest does not have a transaction witness".to_string())
+    }
+}
