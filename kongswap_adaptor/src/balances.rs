@@ -1,6 +1,6 @@
 use crate::{
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
-    log_err,
+    log, log_err,
     tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalance, ValidatedSymbol},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
@@ -78,7 +78,43 @@ impl ValidatedBalances {
 
     // As the metadata of an asset, e.g., its symbol and fee, might change over time,
     // calling this function would update them.
-    pub(crate) fn refresh_asset(&mut self, _asset_id: usize, _asset: &ValidatedAsset) {}
+    pub(crate) fn refresh_asset(&mut self, asset_id: usize, asset_new_info: ValidatedAsset) {
+        let asset = if asset_id == 0 {
+            &mut self.asset_0
+        } else if asset_id == 1 {
+            &mut self.asset_1
+        } else {
+            log_err(&format!("Invalid asset_id {}: must be 0 or 1.", asset_id));
+            return;
+        };
+
+        let asset_old_info = asset.clone();
+
+        let ValidatedAsset::Token {
+            symbol: new_symbol,
+            ledger_canister_id: _,
+            ledger_fee_decimals: new_ledger_fee_decimals,
+        } = asset_new_info;
+
+        if asset.set_symbol(new_symbol) {
+            log(&format!(
+                "Changed asset_{} symbol from `{}` to `{}`.",
+                asset_id,
+                asset_old_info.symbol(),
+                new_symbol,
+            ));
+            return;
+        }
+
+        if asset.set_ledger_fee_decimals(new_ledger_fee_decimals) {
+            log(&format!(
+                "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
+                asset_id,
+                asset_old_info.ledger_fee_decimals(),
+                new_ledger_fee_decimals,
+            ));
+        }
+    }
 
     // This function updates the distribution of balances for a given asset
     // over all parties (treasury owner, manager, external, ...)
@@ -204,7 +240,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
 
             self.with_balances_mut(|validated_balances| {
-                validated_balances.refresh_asset(asset_id, &asset);
+                validated_balances.refresh_asset(asset_id, asset);
             });
         }
 
