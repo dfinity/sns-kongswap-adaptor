@@ -170,7 +170,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     async fn refresh_balances(&mut self) {
-        let result = self.refresh_balances_impl().await;
+        let result = self.refresh_external_balances_impl().await;
 
         if let Err(err) = result {
             log_err(&format!(

@@ -11,6 +11,18 @@ use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent
 use serde::Deserialize;
 use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 
+/// This enumeration indicates which entity in our eco-system,
+/// we are talking about. The naming Party is used to avoid confusion
+/// with the term `Account`.
+enum Party {
+    TreasuryOwner,
+    TreasuryManager,
+    External,
+    FeeCollector,
+    Spendings,
+    Earnings,
+}
+
 #[derive(CandidType, Deserialize, Clone)]
 pub(crate) struct ValidatedBalanceBook {
     pub treasury_owner: ValidatedBalance,
@@ -118,7 +130,31 @@ impl ValidatedBalances {
 
     // This function updates the distribution of balances for a given asset
     // over all parties (treasury owner, manager, external, ...)
-    pub(crate) fn refresh_balances(&mut self, _asset: &ValidatedAsset, _balance: u64) {}
+    pub(crate) fn refresh_balances(&mut self, asset: &ValidatedAsset, balance: u64, party: Party) {
+        let ref mut validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        match party {
+            Party::TreasuryOwner => validated_balance_book.treasury_owner.amount_decimals = balance,
+            Party::TreasuryManager => {
+                validated_balance_book.treasury_owner.amount_decimals = balance
+            }
+            Party::FeeCollector => validated_balance_book.fee_collector = balance,
+            Party::External => validated_balance_book.external = balance,
+            Party::Earnings => validated_balance_book.earnings = balance,
+            Party::Spendings => validated_balance_book.spendings = balance,
+        }
+    }
 }
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -247,7 +283,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
-    pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
+    pub async fn refresh_external_balances_impl(
+        &mut self,
+    ) -> Result<ValidatedBalances, TransactionError> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
 
         if let Err(err) = self.refresh_ledger_metadata(operation).await {
@@ -298,7 +336,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .iter()
                 .zip([balance_0_decimals, balance_1_decimals].iter())
             {
-                validated_balances.refresh_balances(asset, balance);
+                validated_balances.refresh_balances(asset, balance, Party::External);
             }
         });
 
