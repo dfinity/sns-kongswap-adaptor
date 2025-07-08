@@ -1,6 +1,7 @@
 use crate::{
-    balances::ValidatedBalances,
+    balances::{Party, ValidatedBalances},
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
+    log,
     tx_error_codes::TransactionErrorCodes,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -35,6 +36,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )
             .await
             .map_err(|err| vec![err])?;
+
+        // When removing the liquidity and withdrawing the tokens
+        // from DEX to the treasury manager, we pay transfer fee.
+        self.charge_fee(asset_0);
+        self.charge_fee(asset_1);
 
         if !claim_ids.is_empty() {
             let claim_ids = claim_ids
@@ -92,8 +98,25 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 )
                 .await;
 
-            if let Err(err) = response {
-                errors.push(err);
+            // If withdrawal has previously failed and before retrying it,
+            // the symbol of the asset changes, hence, we need to check the
+            // ID of its corresponding ledger canister.
+            match response {
+                Ok(claim_reply) => {
+                    self.with_balances_mut(|balances| {
+                        let asset = if balances
+                            .asset_0
+                            .ledger_caniser_id_match(claim_reply.canister_id)
+                        {
+                            balances.asset_0
+                        } else {
+                            balances.asset_1
+                        };
+
+                        balances.charge_fee(&asset);
+                    });
+                }
+                Err(err) => errors.push(err),
             }
         }
 
@@ -134,10 +157,31 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
         };
 
+        // match self
+        //     .get_ledger_balances(sns_treasury_manager::TreasuryManagerOperation::new(
+        //         sns_treasury_manager::Operation::Withdraw,
+        //     ))
+        //     .await
+        // {
+        //     Ok((balance_0, balance_1)) => {
+        //         self.with_balances_mut(|balances| {
+        //             let asset = balances.asset_0.clone();
+        //             balances.refresh_deposited_balances(&asset, balance_0, Party::TreasuryOwner)
+        //         });
+        //         self.with_balances_mut(|balances| {
+        //             let asset = balances.asset_1.clone();
+        //             balances.refresh_deposited_balances(&asset, balance_1, Party::TreasuryOwner)
+        //         });
+        //     }
+        //     Err(tx_errors) => {
+        //         errors.extend(tx_errors);
+        //     }
+        // }
+
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        Ok(returned_amounts.unwrap())
+        Ok(returned_amounts)
     }
 }

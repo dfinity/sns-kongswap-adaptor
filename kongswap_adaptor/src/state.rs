@@ -102,4 +102,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             balances.asset_1.ledger_canister_id(),
         )
     }
+
+    pub fn charge_fee(&mut self, asset: &ValidatedAsset) {
+        self.with_balances_mut(|validated_balances| validated_balances.charge_fee(asset));
+    }
 }

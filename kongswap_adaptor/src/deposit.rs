@@ -82,6 +82,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 fee,
             };
 
+            // Charge the approval fee.
+            self.charge_fee(asset);
+
             self.emit_transaction(canister_id, request, operation, human_readable)
                 .await?;
         }
@@ -115,7 +118,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.refresh_ledger_metadata(operation).await?;
 
         // Step 4. Ensure the pool exists.
-
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
 
@@ -152,6 +154,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         match result {
             // All used up, since the pool is brand new.
             Ok(_) => {
+                // Transferring the assets to DEX was successful.
+                // Charge the transfer fee.
+                self.charge_fee(&allowance_0.asset);
+                self.charge_fee(&allowance_1.asset);
                 return Ok(self.get_cached_balances());
             }
 
@@ -165,7 +171,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // This is a top-up operation for a pre-existing pool.
         // A top-up requires computing amount_1 as a function of amount_0.
-
         let AddLiquidityAmountsReply { amount_1, .. } = {
             let human_readable = format!(
                 "Calling KongSwapBackend.add_liquidity_amounts to estimate how much liquidity can \
@@ -215,6 +220,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await?
         };
 
+        // Topping-up the DEX with asset_0 and asset_1 was successful.
+        // Charge the transfer fee.
+        self.charge_fee(&allowance_0.asset);
+        self.charge_fee(&allowance_1.asset);
         let AddLiquidityReply { amount_1, .. } = reply;
 
         // @todo As we discussed, the direction of this comparison is reversed.

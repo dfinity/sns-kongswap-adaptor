@@ -45,7 +45,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(balance_decimals)
     }
 
-    async fn get_ledger_balances(
+    pub(crate) async fn get_ledger_balances(
         &mut self,
         operation: TreasuryManagerOperation,
     ) -> Result<(u64, u64), Vec<TransactionError>> {
@@ -118,6 +118,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             let result = self
                 .emit_transaction(ledger_canister_id, request, operation, human_readable)
                 .await;
+
+            match result {
+                Ok(_) => {
+                    self.charge_fee(asset);
+                }
+                Err(err) => withdraw_errors.push(err),
+            }
 
             if let Err(err) = result {
                 withdraw_errors.push(err);
