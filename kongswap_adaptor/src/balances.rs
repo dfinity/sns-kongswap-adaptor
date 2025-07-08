@@ -14,7 +14,7 @@ use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
 /// This enumeration indicates which entity in our eco-system,
 /// we are talking about. The naming Party is used to avoid confusion
 /// with the term `Account`.
-enum Party {
+pub(crate) enum Party {
     TreasuryOwner,
     TreasuryManager,
     External,
@@ -130,8 +130,13 @@ impl ValidatedBalances {
 
     // This function updates the distribution of balances for a given asset
     // over all parties (treasury owner, manager, external, ...)
-    pub(crate) fn refresh_balances(&mut self, asset: &ValidatedAsset, balance: u64, party: Party) {
-        let ref mut validated_balance_book = if *asset == self.asset_0 {
+    pub(crate) fn refresh_deposited_balances(
+        &mut self,
+        asset: &ValidatedAsset,
+        balance: u64,
+        party: Party,
+    ) {
+        let validated_balance_book = if *asset == self.asset_0 {
             &mut self.asset_0_balance
         } else if *asset == self.asset_1 {
             &mut self.asset_1_balance
@@ -154,6 +159,24 @@ impl ValidatedBalances {
             Party::Earnings => validated_balance_book.earnings = balance,
             Party::Spendings => validated_balance_book.spendings = balance,
         }
+    }
+
+    pub(crate) fn charge_fee(&mut self, asset: &ValidatedAsset) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        let fee = asset.ledger_fee_decimals();
+        validated_balance_book.fee_collector += fee;
     }
 }
 
@@ -336,7 +359,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .iter()
                 .zip([balance_0_decimals, balance_1_decimals].iter())
             {
-                validated_balances.refresh_balances(asset, balance, Party::External);
+                validated_balances.refresh_deposited_balances(asset, balance, Party::External);
             }
         });
 
