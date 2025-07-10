@@ -311,7 +311,7 @@ pub struct AddPoolReply {
     pub chain_0: String,
     pub address_0: String,
     pub symbol_0: String,
-    pub amount_0: Nat,
+    pub amount_0: Nat, // Theoretically, upon adding a new pools, amount_i and balance_i should have the exact same value
     pub balance_0: Nat,
     pub chain_1: String,
     pub address_1: String,

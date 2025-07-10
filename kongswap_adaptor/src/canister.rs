@@ -108,6 +108,11 @@ fn log(msg: &str) {
 
 impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
+        // Before withdrawing we reresh the balances of all parties
+        // in the system.
+        let mut kong_adaptor = canister_state();
+        kong_adaptor.refresh_balances().await;
+
         let (ledger_0, ledger_1) = self.ledgers();
 
         let (default_owner_0, default_owner_1) = self.owner_accounts();
@@ -169,8 +174,9 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         Ok(Balances::from(self.get_cached_balances()))
     }
 
+    // TODO this function can return the balances as well
     async fn refresh_balances(&mut self) {
-        let result = self.refresh_external_balances_impl().await;
+        let result = self.refresh_external_balances().await;
 
         if let Err(err) = result {
             log_err(&format!(
