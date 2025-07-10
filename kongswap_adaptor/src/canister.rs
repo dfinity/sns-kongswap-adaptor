@@ -12,8 +12,8 @@ use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
 use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
 use sns_treasury_manager::{
-    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest,
-    Transaction, TransactionError, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
+    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest, Error,
+    ErrorKind, Transaction, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
     WithdrawRequest,
 };
 use state::KongSwapAdaptor;
@@ -128,10 +128,11 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
             request,
         )
             .try_into()
-            .map_err(|err| {
-                vec![TransactionError::Precondition {
-                    error: err,
+            .map_err(|err: String| {
+                vec![Error {
                     code: u64::from(TransactionErrorCodes::PreConditionCode),
+                    message: err.to_string(),
+                    kind: ErrorKind::Precondition {},
                 }]
             })?;
 
@@ -147,10 +148,11 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request.try_into().map_err(|err| {
-            vec![TransactionError::Precondition {
-                error: err,
+        } = request.try_into().map_err(|err: String| {
+            vec![Error {
                 code: u64::from(TransactionErrorCodes::PreConditionCode),
+                message: err.to_string(),
+                kind: ErrorKind::Precondition {},
             }]
         })?;
 

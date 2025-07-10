@@ -1,9 +1,7 @@
 use candid::{CandidType, Principal};
 use ic_stable_structures::{storable::Bound, Storable};
 use serde::Deserialize;
-use sns_treasury_manager::{
-    Transaction, TransactionError, TransactionWitness, TreasuryManagerOperation,
-};
+use sns_treasury_manager::{Error, Transaction, TransactionWitness, TreasuryManagerOperation};
 use std::borrow::Cow;
 
 use crate::balances::ValidatedBalances;
@@ -38,7 +36,7 @@ impl Storable for ConfigState {
 pub(crate) struct StableTransaction {
     pub timestamp_ns: u64,
     pub canister_id: Principal,
-    pub result: Result<TransactionWitness, TransactionError>,
+    pub result: Result<TransactionWitness, Error>,
     pub human_readable: String,
     pub treasury_manager_operation: TreasuryManagerOperation,
 }

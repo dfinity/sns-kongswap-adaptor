@@ -6,7 +6,7 @@ use crate::{
 };
 use candid::Principal;
 use kongswap_adaptor::agent::{AbstractAgent, Request};
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
 use std::{cell::RefCell, thread::LocalKey};
 
 /// Performs the request call and records the transaction in the audit trail.
@@ -17,18 +17,20 @@ async fn emit_transaction<R>(
     request: R,
     treasury_manager_operation: TreasuryManagerOperation,
     human_readable: String,
-) -> Result<R::Ok, TransactionError>
+) -> Result<R::Ok, Error>
 where
     R: Request + Clone,
 {
     let call_result = agent
         .call(canister_id, request.clone())
         .await
-        .map_err(|error| TransactionError::Call {
-            method: request.method().to_string(),
-            error: error.to_string(),
-            canister_id,
+        .map_err(|error| Error {
             code: u64::from(TransactionErrorCodes::CallFailedCode),
+            kind: ErrorKind::Call {
+                method: request.method().to_string(),
+                canister_id,
+            },
+            message: error.to_string(),
         });
 
     let (result, function_output) = match call_result {
@@ -36,9 +38,13 @@ where
         Ok(response) => {
             let res = request
                 .transaction_witness(canister_id, response)
-                .map_err(|err| TransactionError::Backend {
-                    error: err.to_string(),
+                .map_err(|err| Error {
                     code: u64::from(TransactionErrorCodes::BackendCode),
+                    kind: ErrorKind::Call {
+                        method: request.method().to_string(),
+                        canister_id,
+                    },
+                    message: err.to_string(),
                 });
 
             match res {
@@ -75,7 +81,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         request: R,
         treasury_manager_operation: TreasuryManagerOperation,
         human_readable: String,
-    ) -> Result<R::Ok, TransactionError>
+    ) -> Result<R::Ok, Error>
     where
         R: Request + Clone,
     {
