@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use crate::{
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log, log_err,
@@ -21,6 +23,19 @@ pub(crate) enum Party {
     FeeCollector,
     Spendings,
     Earnings,
+}
+
+impl Display for Party {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Party::TreasuryOwner => write!(f, "TreasuryOwner"),
+            Party::TreasuryManager => write!(f, "TreasuryManager"),
+            Party::External => write!(f, "External"),
+            Party::FeeCollector => write!(f, "FeeCollector"),
+            Party::Earnings => write!(f, "Earning"),
+            Party::Spendings => write!(f, "Spendings"),
+        }
+    }
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -130,11 +145,30 @@ impl ValidatedBalances {
 
     // This function updates the distribution of balances for a given asset
     // over all parties (treasury owner, manager, external, ...)
-    pub(crate) fn refresh_deposited_balances(
+    pub(crate) fn refresh_external_balance(&mut self, asset: &ValidatedAsset, balance: u64) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        validated_balance_book.external = balance;
+    }
+
+    // TODO : consider moving fee charging into this function
+    pub(crate) fn move_asset(
         &mut self,
         asset: &ValidatedAsset,
-        balance: u64,
-        party: Party,
+        from: Party,
+        to: Party,
+        amount: u64,
     ) {
         let validated_balance_book = if *asset == self.asset_0 {
             &mut self.asset_0_balance
@@ -149,15 +183,24 @@ impl ValidatedBalances {
             return;
         };
 
-        match party {
-            Party::TreasuryOwner => validated_balance_book.treasury_owner.amount_decimals = balance,
-            Party::TreasuryManager => {
-                validated_balance_book.treasury_owner.amount_decimals = balance
+        match (&from, &to) {
+            (Party::External, Party::TreasuryManager) => {
+                validated_balance_book.external -= amount;
+                validated_balance_book.treasury_manager.amount_decimals +=
+                    amount - asset.ledger_fee_decimals();
             }
-            Party::FeeCollector => validated_balance_book.fee_collector = balance,
-            Party::External => validated_balance_book.external = balance,
-            Party::Earnings => validated_balance_book.earnings = balance,
-            Party::Spendings => validated_balance_book.spendings = balance,
+            (Party::TreasuryManager, Party::TreasuryOwner) => {
+                validated_balance_book.treasury_manager.amount_decimals -= amount;
+                validated_balance_book.treasury_owner.amount_decimals +=
+                    amount - asset.ledger_fee_decimals();
+            }
+            (Party::TreasuryManager, Party::External) => {
+                validated_balance_book.external += amount - asset.ledger_fee_decimals();
+                validated_balance_book.treasury_manager.amount_decimals -= amount;
+            }
+            _ => {
+                log_err(&format!("Invalid asset movement from {} to {}", from, to));
+            }
         }
     }
 
@@ -306,7 +349,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
-    pub async fn refresh_external_balances_impl(
+    pub async fn refresh_external_balances(
         &mut self,
     ) -> Result<ValidatedBalances, TransactionError> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
@@ -359,7 +402,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .iter()
                 .zip([balance_0_decimals, balance_1_decimals].iter())
             {
-                validated_balances.refresh_deposited_balances(asset, balance, Party::External);
+                validated_balances.refresh_external_balance(asset, balance);
             }
         });
 

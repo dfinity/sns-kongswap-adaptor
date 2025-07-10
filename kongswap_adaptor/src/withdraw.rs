@@ -3,6 +3,7 @@ use crate::{
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
     log,
     tx_error_codes::TransactionErrorCodes,
+    validation::decode_nat_to_u64,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
@@ -27,7 +28,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             remove_lp_token_amount,
         };
 
-        let RemoveLiquidityReply { claim_ids, .. } = self
+        let RemoveLiquidityReply {
+            claim_ids,
+            amount_0,
+            lp_fee_0,
+            amount_1,
+            lp_fee_1,
+            ..
+        } = self
             .emit_transaction(
                 *KONG_BACKEND_CANISTER_ID,
                 request,
@@ -36,11 +44,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )
             .await
             .map_err(|err| vec![err])?;
-
-        // When removing the liquidity and withdrawing the tokens
-        // from DEX to the treasury manager, we pay transfer fee.
-        self.charge_fee(asset_0);
-        self.charge_fee(asset_1);
 
         if !claim_ids.is_empty() {
             let claim_ids = claim_ids
@@ -56,6 +59,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 code: u64::from(TransactionErrorCodes::BackendCode),
             }]);
         }
+
+        // When removing the liquidity and withdrawing the tokens
+        // from DEX to the treasury manager, we pay transfer fee.
+        self.charge_fee(&asset_0);
+        self.charge_fee(&asset_1);
+
+        // TODO Unwrapping
+        let amount_0 = decode_nat_to_u64(amount_0 + lp_fee_0).unwrap();
+        let amount_1 = decode_nat_to_u64(amount_1 + lp_fee_1).unwrap();
+        self.move_asset(&asset_0, amount_0, Party::External, Party::TreasuryManager);
+        self.move_asset(&asset_1, amount_1, Party::External, Party::TreasuryManager);
 
         Ok(())
     }
@@ -113,7 +127,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                             balances.asset_1
                         };
 
+                        let amount = decode_nat_to_u64(claim_reply.amount).unwrap();
                         balances.charge_fee(&asset);
+                        balances.move_asset(
+                            &asset,
+                            Party::External,
+                            Party::TreasuryManager,
+                            amount,
+                        );
                     });
                 }
                 Err(err) => errors.push(err),
@@ -150,38 +171,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )
             .await
         {
-            Ok(amounts) => Some(amounts),
+            Ok(returned_amounts) => Ok(returned_amounts),
             Err(err) => {
-                errors.extend(err.into_iter());
-                None
+                errors.extend(err.clone());
+                Err(err)
             }
         };
-
-        // match self
-        //     .get_ledger_balances(sns_treasury_manager::TreasuryManagerOperation::new(
-        //         sns_treasury_manager::Operation::Withdraw,
-        //     ))
-        //     .await
-        // {
-        //     Ok((balance_0, balance_1)) => {
-        //         self.with_balances_mut(|balances| {
-        //             let asset = balances.asset_0.clone();
-        //             balances.refresh_deposited_balances(&asset, balance_0, Party::TreasuryOwner)
-        //         });
-        //         self.with_balances_mut(|balances| {
-        //             let asset = balances.asset_1.clone();
-        //             balances.refresh_deposited_balances(&asset, balance_1, Party::TreasuryOwner)
-        //         });
-        //     }
-        //     Err(tx_errors) => {
-        //         errors.extend(tx_errors);
-        //     }
-        // }
 
         if !errors.is_empty() {
             return Err(errors);
         }
 
-        Ok(returned_amounts)
+        returned_amounts
     }
 }

@@ -1,17 +1,17 @@
 use crate::{
-    balances::ValidatedBalances,
+    balances::{Party, ValidatedBalances},
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs,
     },
     tx_error_codes::TransactionErrorCodes,
-    validation::{saturating_sub, ValidatedAllowance},
+    validation::{decode_nat_to_u64, saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{TransactionError, TreasuryManager, TreasuryManagerOperation};
 
 /// How many ledger transaction that incur fees are required for a deposit operation (per token).
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
@@ -153,9 +153,24 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         match result {
             // All used up, since the pool is brand new.
-            Ok(_) => {
+            Ok(add_pool_reply) => {
                 // Transferring the assets to DEX was successful.
                 // Charge the transfer fee.
+                // TODO unwrapping
+                let amount_0 = decode_nat_to_u64(add_pool_reply.balance_0).unwrap();
+                let amount_1 = decode_nat_to_u64(add_pool_reply.balance_1).unwrap();
+                self.move_asset(
+                    &allowance_0.asset,
+                    amount_0,
+                    Party::TreasuryManager,
+                    Party::External,
+                );
+                self.move_asset(
+                    &allowance_1.asset,
+                    amount_1,
+                    Party::TreasuryManager,
+                    Party::External,
+                );
                 self.charge_fee(&allowance_0.asset);
                 self.charge_fee(&allowance_1.asset);
                 return Ok(self.get_cached_balances());
@@ -202,9 +217,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
             let request = AddLiquidityArgs {
                 token_0,
-                amount_0,
+                amount_0: amount_0.clone(),
                 token_1,
-                amount_1,
+                amount_1: amount_1.clone(),
 
                 // Not needed for the ICRC2 flow.
                 tx_id_0: None,
@@ -222,9 +237,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // Topping-up the DEX with asset_0 and asset_1 was successful.
         // Charge the transfer fee.
+        let AddLiquidityReply { amount_1, .. } = reply;
+        let amount_0 = decode_nat_to_u64(amount_0).unwrap();
+        let amount_1 = decode_nat_to_u64(amount_1).unwrap();
+        self.move_asset(
+            &allowance_0.asset,
+            amount_0,
+            Party::TreasuryManager,
+            Party::External,
+        );
+        self.move_asset(
+            &allowance_1.asset,
+            amount_1,
+            Party::TreasuryManager,
+            Party::External,
+        );
         self.charge_fee(&allowance_0.asset);
         self.charge_fee(&allowance_1.asset);
-        let AddLiquidityReply { amount_1, .. } = reply;
 
         // @todo As we discussed, the direction of this comparison is reversed.
         if original_amount_1 < amount_1 {
@@ -237,9 +266,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             });
         }
 
+        self.refresh_balances();
+
         Ok(self.get_cached_balances())
     }
 
+    // TODO refersh balances
     pub async fn deposit_impl(
         &mut self,
         allowance_0: ValidatedAllowance,
