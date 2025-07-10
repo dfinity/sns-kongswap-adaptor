@@ -13,6 +13,7 @@ use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent
 use serde::Deserialize;
 use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
 
+#[allow(dead_code)]
 /// This enumeration indicates which entity in our eco-system,
 /// we are talking about. The naming Party is used to avoid confusion
 /// with the term `Account`.

@@ -265,7 +265,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             });
         }
 
-        self.refresh_balances();
+        self.refresh_balances().await;
 
         Ok(self.get_cached_balances())
     }
