@@ -617,7 +617,7 @@ impl From<ValidatedBalanceBook> for BalanceBook {
         Self {
             treasury_owner: Some(value.treasury_owner.clone().into()),
             treasury_manager: Some(value.treasury_manager.clone().into()),
-            external: Some(Balance {
+            external_custodian: Some(Balance {
                 amount_decimals: Nat::from(value.external),
                 account: None,
                 name: None,
@@ -627,13 +627,18 @@ impl From<ValidatedBalanceBook> for BalanceBook {
                 account: None,
                 name: None,
             }),
-            spendings: Some(Balance {
+            payees: Some(Balance {
                 amount_decimals: Nat::from(value.spendings),
                 account: None,
                 name: None,
             }),
-            earnings: Some(Balance {
+            payers: Some(Balance {
                 amount_decimals: Nat::from(value.earnings),
+                account: None,
+                name: None,
+            }),
+            balance_discrepancy: Some(Balance {
+                amount_decimals: Nat::from(value.balance_discrepancy),
                 account: None,
                 name: None,
             }),

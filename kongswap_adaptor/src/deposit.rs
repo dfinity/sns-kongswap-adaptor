@@ -11,7 +11,7 @@ use crate::{
 use candid::Nat;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManager, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManager, TreasuryManagerOperation};
 
 /// How many ledger transaction that incur fees are required for a deposit operation (per token).
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
@@ -22,7 +22,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, TransactionError> {
+    ) -> Result<ValidatedBalances, Error> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit);
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
@@ -35,16 +35,18 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             if new_ledger_0 != old_asset_0.ledger_canister_id()
                 || new_ledger_1 != old_asset_1.ledger_canister_id()
             {
-                return Err(TransactionError::Precondition {
-                    error: format!(
+                return Err(Error {
+                code: u64::from(TransactionErrorCodes::PreConditionCode),
+                    message: format!(
                     "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
                     old_asset_0.symbol(),
                     old_asset_1.symbol(),
                     new_ledger_0,
                     new_ledger_1,
                 ),
-                code: u64::from(TransactionErrorCodes::PreConditionCode)
-            });
+                kind: ErrorKind::Precondition {  }
+                }
+            );
             }
         }
 
@@ -171,13 +173,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     Party::TreasuryManager,
                     Party::External,
                 );
-                self.charge_fee(&allowance_0.asset);
-                self.charge_fee(&allowance_1.asset);
                 return Ok(self.get_cached_balances());
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
-            Err(TransactionError::Backend { error, .. }) if tolerated_errors.contains(&error) => (),
+            Err(Error { message, .. }) if tolerated_errors.contains(&message) => (),
 
             Err(err) => {
                 return Err(err);
@@ -252,17 +252,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             Party::TreasuryManager,
             Party::External,
         );
-        self.charge_fee(&allowance_0.asset);
-        self.charge_fee(&allowance_1.asset);
 
         // @todo As we discussed, the direction of this comparison is reversed.
         if original_amount_1 < amount_1 {
-            return Err(TransactionError::Backend {
-                error: format!(
+            return Err(Error {
+                code: u64::from(TransactionErrorCodes::BackendCode),
+                message: format!(
                     "Got top-up amount_1 = {} (must be at least {})",
                     original_amount_1, amount_1
                 ),
-                code: u64::from(TransactionErrorCodes::BackendCode),
+                kind: ErrorKind::Backend {},
             });
         }
 
@@ -276,7 +275,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<Error>> {
         let deposit_into_dex_result = self.deposit_into_dex(allowance_0, allowance_1).await;
 
         let returned_amounts_result = self
