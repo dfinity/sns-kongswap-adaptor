@@ -11,6 +11,7 @@ use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
 use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder};
 use pocket_ic_agent::PocketIcAgent;
+use pretty_assertions::assert_eq;
 use sha2::Digest;
 use sns_treasury_manager::{
     self, Allowance, Asset, AuditTrailRequest, BalancesRequest, TreasuryManagerArg,
@@ -118,8 +119,9 @@ async fn e2e_test() {
     )
     .await;
 
-    // We need fewer than 50 ticks to get the initial deposit to be processed.
-    for _ in 0..50 {
+    // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
+    // tasks to be processed.
+    for _ in 0..100 {
         agent.pic().advance_time(Duration::from_secs(1)).await;
         agent.pic().tick().await;
     }
@@ -130,17 +132,17 @@ async fn e2e_test() {
         .unwrap()
         .unwrap();
 
-    let audit_trail_before_upgrade = agent
-        .call(kong_adaptor_canister_id, AuditTrailRequest {})
-        .await
-        .unwrap();
-
     let module_hash_before_upgrade = agent
         .pic()
         .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
+        .unwrap();
+
+    let audit_trail_before_upgrade = agent
+        .call(kong_adaptor_canister_id, AuditTrailRequest {})
+        .await
         .unwrap();
 
     let modified_wasm = original_wasm.clone().modified();
@@ -160,6 +162,12 @@ async fn e2e_test() {
         .await
         .unwrap();
 
+    // Should be called before balances, since the latter affects the audit trail.
+    let audit_trail_after_upgrade = agent
+        .call(kong_adaptor_canister_id, AuditTrailRequest {})
+        .await
+        .unwrap();
+
     let module_hash_after_upgrade = agent
         .pic()
         .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
@@ -172,11 +180,6 @@ async fn e2e_test() {
         .call(kong_adaptor_canister_id, BalancesRequest {})
         .await
         .unwrap()
-        .unwrap();
-
-    let audit_trail_after_upgrade = agent
-        .call(kong_adaptor_canister_id, AuditTrailRequest {})
-        .await
         .unwrap();
 
     assert_ne!(module_hash_after_upgrade, module_hash_before_upgrade);
