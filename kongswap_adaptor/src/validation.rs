@@ -637,8 +637,8 @@ impl From<ValidatedBalanceBook> for BalanceBook {
                 account: None,
                 name: None,
             }),
-            balance_discrepancy: Some(Balance {
-                amount_decimals: Nat::from(value.balance_discrepancy),
+            suspense: Some(Balance {
+                amount_decimals: Nat::from(value.suspense),
                 account: None,
                 name: None,
             }),
