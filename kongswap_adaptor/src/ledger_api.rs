@@ -1,5 +1,5 @@
 use crate::{
-    balances::ValidatedBalances,
+    balances::{Party, ValidatedBalances},
     state::KongSwapAdaptor,
     tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset},
@@ -10,14 +10,14 @@ use icrc_ledger_types::icrc1::{
     transfer::{Memo, TransferArg},
 };
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManager, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn get_ledger_balance_decimals(
         &mut self,
         operation: TreasuryManagerOperation,
         asset: ValidatedAsset,
-    ) -> Result<u64, TransactionError> {
+    ) -> Result<u64, Error> {
         let ledger_canister_id = asset.ledger_canister_id();
 
         let request = Account {
@@ -35,20 +35,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .emit_transaction(ledger_canister_id, request, operation, human_readable)
             .await?;
 
-        let balance_decimals = decode_nat_to_u64(balance_decimals).map_err(|error| {
-            TransactionError::Postcondition {
-                error,
-                code: u64::from(TransactionErrorCodes::PostConditionCode),
-            }
+        let balance_decimals = decode_nat_to_u64(balance_decimals).map_err(|error| Error {
+            code: u64::from(TransactionErrorCodes::PostConditionCode),
+            message: error.clone(),
+            kind: ErrorKind::Postcondition {},
         })?;
 
         Ok(balance_decimals)
     }
 
-    async fn get_ledger_balances(
+    pub(crate) async fn get_ledger_balances(
         &mut self,
         operation: TreasuryManagerOperation,
-    ) -> Result<(u64, u64), Vec<TransactionError>> {
+    ) -> Result<(u64, u64), Vec<Error>> {
         let (asset_0, asset_1) = self.assets();
 
         // TODO: These calls could be parallelized.
@@ -68,7 +67,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         operation: TreasuryManagerOperation,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<Error>> {
         let (asset_0, asset_1) = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
@@ -119,14 +118,24 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .emit_transaction(ledger_canister_id, request, operation, human_readable)
                 .await;
 
-            if let Err(err) = result {
-                withdraw_errors.push(err);
+            match result {
+                Ok(_) => {
+                    self.move_asset(
+                        &asset,
+                        amount_decimals,
+                        Party::TreasuryManager,
+                        Party::TreasuryOwner,
+                    );
+                }
+                Err(err) => withdraw_errors.push(err),
             }
         }
 
         if !withdraw_errors.is_empty() {
             return Err(withdraw_errors);
         }
+
+        self.refresh_balances().await;
 
         Ok(self.get_cached_balances())
     }

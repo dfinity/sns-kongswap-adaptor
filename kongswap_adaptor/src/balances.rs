@@ -1,6 +1,8 @@
+use std::fmt::Display;
+
 use crate::{
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
-    log_err,
+    log, log_err,
     tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalance, ValidatedSymbol},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
@@ -9,7 +11,32 @@ use candid::{CandidType, Principal};
 use icrc_ledger_types::{icrc::generic_metadata_value::MetadataValue, icrc1::account::Account};
 use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent};
 use serde::Deserialize;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
+
+/// This enumeration indicates which entity in our eco-system,
+/// we are talking about. The naming Party is used to avoid confusion
+/// with the term `Account`.
+pub(crate) enum Party {
+    TreasuryOwner,
+    TreasuryManager,
+    External,
+    FeeCollector,
+    Spendings,
+    Earnings,
+}
+
+impl Display for Party {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Party::TreasuryOwner => write!(f, "TreasuryOwner"),
+            Party::TreasuryManager => write!(f, "TreasuryManager"),
+            Party::External => write!(f, "External"),
+            Party::FeeCollector => write!(f, "FeeCollector"),
+            Party::Earnings => write!(f, "Earning"),
+            Party::Spendings => write!(f, "Spendings"),
+        }
+    }
+}
 
 #[derive(CandidType, Deserialize, Clone)]
 pub(crate) struct ValidatedBalanceBook {
@@ -19,6 +46,7 @@ pub(crate) struct ValidatedBalanceBook {
     pub fee_collector: u64,
     pub spendings: u64,
     pub earnings: u64,
+    pub suspense: u64,
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -57,6 +85,7 @@ impl ValidatedBalances {
             fee_collector: 0,
             spendings: 0,
             earnings: 0,
+            suspense: 0,
         };
         let asset_1_balance = ValidatedBalanceBook {
             treasury_owner: ValidatedBalance::from((asset_1, owner_account_1.owner)),
@@ -65,6 +94,7 @@ impl ValidatedBalances {
             fee_collector: 0,
             spendings: 0,
             earnings: 0,
+            suspense: 0,
         };
 
         Self {
@@ -78,11 +108,127 @@ impl ValidatedBalances {
 
     // As the metadata of an asset, e.g., its symbol and fee, might change over time,
     // calling this function would update them.
-    pub(crate) fn refresh_asset(&mut self, _asset_id: usize, _asset: &ValidatedAsset) {}
+    pub(crate) fn refresh_asset(&mut self, asset_id: usize, asset_new: ValidatedAsset) {
+        let asset = if asset_id == 0 {
+            &mut self.asset_0
+        } else if asset_id == 1 {
+            &mut self.asset_1
+        } else {
+            log_err(&format!("Invalid asset_id {}: must be 0 or 1.", asset_id));
+            return;
+        };
+
+        let asset_old_info = asset.clone();
+
+        let ValidatedAsset::Token {
+            symbol: new_symbol,
+            ledger_canister_id: _,
+            ledger_fee_decimals: new_ledger_fee_decimals,
+        } = asset_new;
+
+        if asset.set_symbol(new_symbol) {
+            log(&format!(
+                "Changed asset_{} symbol from `{}` to `{}`.",
+                asset_id,
+                asset_old_info.symbol(),
+                new_symbol,
+            ));
+            return;
+        }
+
+        if asset.set_ledger_fee_decimals(new_ledger_fee_decimals) {
+            log(&format!(
+                "Changed asset_{} ledger_fee_decimals from `{}` to `{}`.",
+                asset_id,
+                asset_old_info.ledger_fee_decimals(),
+                new_ledger_fee_decimals,
+            ));
+        }
+    }
 
     // This function updates the distribution of balances for a given asset
     // over all parties (treasury owner, manager, external, ...)
-    pub(crate) fn refresh_balances(&mut self, _asset: &ValidatedAsset, _balance: u64) {}
+    pub(crate) fn refresh_external_custodian_balance(
+        &mut self,
+        asset: &ValidatedAsset,
+        balance: u64,
+    ) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        validated_balance_book.external = balance;
+    }
+
+    pub(crate) fn move_asset(
+        &mut self,
+        asset: &ValidatedAsset,
+        from: Party,
+        to: Party,
+        amount: u64,
+    ) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        match (&from, &to) {
+            (Party::External, Party::TreasuryManager) => {
+                validated_balance_book.external -= amount;
+                validated_balance_book.treasury_manager.amount_decimals +=
+                    amount - asset.ledger_fee_decimals();
+            }
+            (Party::TreasuryManager, Party::TreasuryOwner) => {
+                validated_balance_book.treasury_manager.amount_decimals -= amount;
+                validated_balance_book.treasury_owner.amount_decimals +=
+                    amount - asset.ledger_fee_decimals();
+            }
+            (Party::TreasuryManager, Party::External) => {
+                validated_balance_book.external += amount - asset.ledger_fee_decimals();
+                validated_balance_book.treasury_manager.amount_decimals -= amount;
+            }
+            _ => {
+                log_err(&format!("Invalid asset movement from {} to {}", from, to));
+            }
+        }
+
+        validated_balance_book.fee_collector += asset.ledger_fee_decimals();
+    }
+
+    pub(crate) fn charge_fee(&mut self, asset: &ValidatedAsset) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        let fee = asset.ledger_fee_decimals();
+        validated_balance_book.fee_collector += fee;
+    }
 }
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -90,7 +236,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub async fn refresh_ledger_metadata(
         &mut self,
         operation: TreasuryManagerOperation,
-    ) -> Result<(), TransactionError> {
+    ) -> Result<(), Error> {
         let (asset_0, asset_1) = self.assets();
 
         // TODO: All calls in this loop could be started in parallel, and then `join_all`d.
@@ -149,12 +295,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             });
 
             let Some(MetadataValue::Text(new_symbol)) = new_symbol else {
-                return Err(TransactionError::Postcondition {
-                    error: format!(
+                return Err(Error {
+                    code: u64::from(TransactionErrorCodes::PostConditionCode),
+                    message: format!(
                         "Ledger {} icrc1_metadata response does not have an `icrc1:symbol`.",
                         ledger_canister_id
                     ),
-                    code: u64::from(TransactionErrorCodes::PostConditionCode),
+                    kind: ErrorKind::Postcondition {},
                 });
             };
 
@@ -181,11 +328,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             });
 
             let Some(MetadataValue::Nat(new_fee)) = new_fee else {
-                return Err(TransactionError::Postcondition {
-                    error: format!(
+                return Err(Error {
+                    message: format!(
                         "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
                         ledger_canister_id
                     ),
+                    kind: ErrorKind::Postcondition {},
                     code: u64::from(TransactionErrorCodes::PostConditionCode),
                 });
             };
@@ -204,14 +352,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
 
             self.with_balances_mut(|validated_balances| {
-                validated_balances.refresh_asset(asset_id, &asset);
+                validated_balances.refresh_asset(asset_id, asset);
             });
         }
 
         Ok(())
     }
 
-    pub async fn refresh_balances_impl(&mut self) -> Result<ValidatedBalances, TransactionError> {
+    pub async fn refresh_external_balances(&mut self) -> Result<ValidatedBalances, Error> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
 
         if let Err(err) = self.refresh_ledger_metadata(operation).await {
@@ -246,23 +394,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             amount_0, amount_1, ..
         } = reply;
 
-        let balance_0_decimals =
-            decode_nat_to_u64(amount_0).map_err(|err| TransactionError::Postcondition {
-                error: err,
-                code: u64::from(TransactionErrorCodes::PostConditionCode),
-            })?;
-        let balance_1_decimals =
-            decode_nat_to_u64(amount_1).map_err(|err| TransactionError::Postcondition {
-                error: err,
-                code: u64::from(TransactionErrorCodes::PostConditionCode),
-            })?;
+        let balance_0_decimals = decode_nat_to_u64(amount_0).map_err(|err| Error {
+            code: u64::from(TransactionErrorCodes::PostConditionCode),
+            message: err.clone(),
+            kind: ErrorKind::Postcondition {},
+        })?;
+        let balance_1_decimals = decode_nat_to_u64(amount_1).map_err(|err| Error {
+            code: u64::from(TransactionErrorCodes::PostConditionCode),
+            message: err.clone(),
+            kind: ErrorKind::Postcondition {},
+        })?;
 
         self.with_balances_mut(|validated_balances| {
             for (asset, &balance) in [asset_0, asset_1]
                 .iter()
                 .zip([balance_0_decimals, balance_1_decimals].iter())
             {
-                validated_balances.refresh_balances(asset, balance);
+                validated_balances.refresh_external_custodian_balance(asset, balance);
             }
         });
 

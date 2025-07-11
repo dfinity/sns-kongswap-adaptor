@@ -1,17 +1,17 @@
 use crate::{
-    balances::ValidatedBalances,
+    balances::{Party, ValidatedBalances},
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs,
     },
     tx_error_codes::TransactionErrorCodes,
-    validation::{saturating_sub, ValidatedAllowance},
+    validation::{decode_nat_to_u64, saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
 use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManager, TreasuryManagerOperation};
 
 /// How many ledger transaction that incur fees are required for a deposit operation (per token).
 /// This is an implementation detail of KongSwap and ICRC1 ledgers.
@@ -22,7 +22,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, TransactionError> {
+    ) -> Result<ValidatedBalances, Error> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit);
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
@@ -35,16 +35,18 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             if new_ledger_0 != old_asset_0.ledger_canister_id()
                 || new_ledger_1 != old_asset_1.ledger_canister_id()
             {
-                return Err(TransactionError::Precondition {
-                    error: format!(
+                return Err(Error {
+                code: u64::from(TransactionErrorCodes::PreConditionCode),
+                    message: format!(
                     "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
                     old_asset_0.symbol(),
                     old_asset_1.symbol(),
                     new_ledger_0,
                     new_ledger_1,
                 ),
-                code: u64::from(TransactionErrorCodes::PreConditionCode)
-            });
+                kind: ErrorKind::Precondition {  }
+                }
+            );
             }
         }
 
@@ -82,6 +84,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 fee,
             };
 
+            // Charge the approval fee.
+            self.charge_fee(asset);
+
             self.emit_transaction(canister_id, request, operation, human_readable)
                 .await?;
         }
@@ -115,7 +120,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.refresh_ledger_metadata(operation).await?;
 
         // Step 4. Ensure the pool exists.
-
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
 
@@ -151,12 +155,29 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         match result {
             // All used up, since the pool is brand new.
-            Ok(_) => {
+            Ok(add_pool_reply) => {
+                // Transferring the assets to DEX was successful.
+                // Charge the transfer fee.
+                // TODO unwrapping
+                let amount_0 = decode_nat_to_u64(add_pool_reply.balance_0).unwrap();
+                let amount_1 = decode_nat_to_u64(add_pool_reply.balance_1).unwrap();
+                self.move_asset(
+                    &allowance_0.asset,
+                    amount_0,
+                    Party::TreasuryManager,
+                    Party::External,
+                );
+                self.move_asset(
+                    &allowance_1.asset,
+                    amount_1,
+                    Party::TreasuryManager,
+                    Party::External,
+                );
                 return Ok(self.get_cached_balances());
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
-            Err(TransactionError::Backend { error, .. }) if tolerated_errors.contains(&error) => (),
+            Err(Error { message, .. }) if tolerated_errors.contains(&message) => (),
 
             Err(err) => {
                 return Err(err);
@@ -165,7 +186,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // This is a top-up operation for a pre-existing pool.
         // A top-up requires computing amount_1 as a function of amount_0.
-
         let AddLiquidityAmountsReply { amount_1, .. } = {
             let human_readable = format!(
                 "Calling KongSwapBackend.add_liquidity_amounts to estimate how much liquidity can \
@@ -197,9 +217,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
             let request = AddLiquidityArgs {
                 token_0,
-                amount_0,
+                amount_0: amount_0.clone(),
                 token_1,
-                amount_1,
+                amount_1: amount_1.clone(),
 
                 // Not needed for the ICRC2 flow.
                 tx_id_0: None,
@@ -215,27 +235,47 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await?
         };
 
+        // Topping-up the DEX with asset_0 and asset_1 was successful.
+        // Charge the transfer fee.
         let AddLiquidityReply { amount_1, .. } = reply;
+        let amount_0 = decode_nat_to_u64(amount_0).unwrap();
+        let amount_1 = decode_nat_to_u64(amount_1).unwrap();
+        self.move_asset(
+            &allowance_0.asset,
+            amount_0,
+            Party::TreasuryManager,
+            Party::External,
+        );
+        self.move_asset(
+            &allowance_1.asset,
+            amount_1,
+            Party::TreasuryManager,
+            Party::External,
+        );
 
         // @todo As we discussed, the direction of this comparison is reversed.
         if original_amount_1 < amount_1 {
-            return Err(TransactionError::Backend {
-                error: format!(
+            return Err(Error {
+                code: u64::from(TransactionErrorCodes::BackendCode),
+                message: format!(
                     "Got top-up amount_1 = {} (must be at least {})",
                     original_amount_1, amount_1
                 ),
-                code: u64::from(TransactionErrorCodes::BackendCode),
+                kind: ErrorKind::Backend {},
             });
         }
+
+        self.refresh_balances().await;
 
         Ok(self.get_cached_balances())
     }
 
+    // TODO refersh balances
     pub async fn deposit_impl(
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<Error>> {
         let deposit_into_dex_result = self.deposit_into_dex(allowance_0, allowance_1).await;
 
         let returned_amounts_result = self

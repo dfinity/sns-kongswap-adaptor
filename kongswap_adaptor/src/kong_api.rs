@@ -9,7 +9,7 @@ use crate::{
 use candid::{Nat, Principal};
 use itertools::{Either, Itertools};
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
 use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -22,7 +22,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         ledger_canister_id: Principal,
         operation: TreasuryManagerOperation,
-    ) -> Result<(), TransactionError> {
+    ) -> Result<(), Error> {
         let token = format!("IC.{}", ledger_canister_id);
 
         let human_readable = format!(
@@ -45,19 +45,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         match response {
             Ok(_) => Ok(()),
-            Err(TransactionError::Backend { error, code: _ })
-                if error == format!("Token {} already exists", token) =>
-            {
+            Err(Error { message, .. }) if message == format!("Token {} already exists", token) => {
                 Ok(())
             }
             Err(err) => Err(err),
         }
     }
 
-    pub async fn lp_balance(
-        &mut self,
-        operation: TreasuryManagerOperation,
-    ) -> Result<Nat, TransactionError> {
+    pub async fn lp_balance(&mut self, operation: TreasuryManagerOperation) -> Result<Nat, Error> {
         let request = UserBalancesArgs {
             principal_id: self.id.to_string(),
         };
@@ -92,18 +87,20 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         );
 
         if !errors.is_empty() {
-            return Err(TransactionError::Backend {
-                error: format!("Failed to convert balances: {:?}", errors.join(", ")),
+            return Err(Error {
                 code: u64::from(TransactionErrorCodes::BackendCode),
+                message: format!("Failed to convert balances: {:?}", errors.join(", ")),
+                kind: ErrorKind::Backend {},
             });
         }
 
         let lp_token = self.lp_token();
 
         let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
-            return Err(TransactionError::Backend {
-                error: format!("Failed to get LP balance for {}.", lp_token),
+            return Err(Error {
                 code: u64::from(TransactionErrorCodes::BackendCode),
+                message: format!("Failed to get LP balance for {}.", lp_token),
+                kind: ErrorKind::Backend {},
             });
         };
 

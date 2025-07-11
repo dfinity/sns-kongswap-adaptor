@@ -214,6 +214,19 @@ pub(crate) enum ValidatedAsset {
     },
 }
 
+impl ValidatedAsset {
+    pub(crate) fn ledger_caniser_id_match(
+        &self,
+        string_ledger_canister_id: Option<String>,
+    ) -> bool {
+        match self {
+            ValidatedAsset::Token {
+                ledger_canister_id, ..
+            } => Some(ledger_canister_id.to_text()) == string_ledger_canister_id,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ValidatedAllowance {
     pub asset: ValidatedAsset,
@@ -604,7 +617,7 @@ impl From<ValidatedBalanceBook> for BalanceBook {
         Self {
             treasury_owner: Some(value.treasury_owner.clone().into()),
             treasury_manager: Some(value.treasury_manager.clone().into()),
-            external: Some(Balance {
+            external_custodian: Some(Balance {
                 amount_decimals: Nat::from(value.external),
                 account: None,
                 name: None,
@@ -614,13 +627,18 @@ impl From<ValidatedBalanceBook> for BalanceBook {
                 account: None,
                 name: None,
             }),
-            spendings: Some(Balance {
+            payees: Some(Balance {
                 amount_decimals: Nat::from(value.spendings),
                 account: None,
                 name: None,
             }),
-            earnings: Some(Balance {
+            payers: Some(Balance {
                 amount_decimals: Nat::from(value.earnings),
+                account: None,
+                name: None,
+            }),
+            suspense: Some(Balance {
+                amount_decimals: Nat::from(value.suspense),
                 account: None,
                 name: None,
             }),

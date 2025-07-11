@@ -1,5 +1,8 @@
 use crate::{
-    balances::ValidatedBalances, log_err, state::storage::ConfigState, validation::ValidatedAsset,
+    balances::{Party, ValidatedBalances},
+    log_err,
+    state::storage::ConfigState,
+    validation::ValidatedAsset,
     StableAuditTrail, StableBalances,
 };
 use candid::Principal;
@@ -104,5 +107,15 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             balances.asset_0.ledger_canister_id(),
             balances.asset_1.ledger_canister_id(),
         )
+    }
+
+    pub fn charge_fee(&mut self, asset: &ValidatedAsset) {
+        self.with_balances_mut(|validated_balances| validated_balances.charge_fee(asset));
+    }
+
+    pub fn move_asset(&mut self, asset: &ValidatedAsset, amount: u64, from: Party, to: Party) {
+        self.with_balances_mut(|validated_balances| {
+            validated_balances.move_asset(asset, from, to, amount)
+        });
     }
 }

@@ -1,15 +1,16 @@
 use crate::{
-    balances::ValidatedBalances,
+    balances::{Party, ValidatedBalances},
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
     tx_error_codes::TransactionErrorCodes,
+    validation::decode_nat_to_u64,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{TransactionError, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
-    async fn withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
+    async fn withdraw_from_dex(&mut self) -> Result<(), Vec<Error>> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Withdraw);
 
         let remove_lp_token_amount = self.lp_balance(operation).await.map_err(|err| vec![err])?;
@@ -26,7 +27,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             remove_lp_token_amount,
         };
 
-        let RemoveLiquidityReply { claim_ids, .. } = self
+        let RemoveLiquidityReply {
+            claim_ids,
+            amount_0,
+            lp_fee_0,
+            amount_1,
+            lp_fee_1,
+            ..
+        } = self
             .emit_transaction(
                 *KONG_BACKEND_CANISTER_ID,
                 request,
@@ -42,19 +50,26 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .map(|claim_id| claim_id.to_string())
                 .collect::<Vec<_>>()
                 .join(", ");
-            return Err(vec![TransactionError::Backend {
-                error: format!(
+            return Err(vec![Error {
+                code: u64::from(TransactionErrorCodes::BackendCode),
+                message: format!(
                     "Withdrawal from DEX might not be complete, returned claims: {}.",
                     claim_ids
                 ),
-                code: u64::from(TransactionErrorCodes::BackendCode),
+                kind: ErrorKind::Backend {},
             }]);
         }
+
+        // TODO Unwrapping
+        let amount_0 = decode_nat_to_u64(amount_0 + lp_fee_0).unwrap();
+        let amount_1 = decode_nat_to_u64(amount_1 + lp_fee_1).unwrap();
+        self.move_asset(&asset_0, amount_0, Party::External, Party::TreasuryManager);
+        self.move_asset(&asset_1, amount_1, Party::External, Party::TreasuryManager);
 
         Ok(())
     }
 
-    pub async fn retry_withdraw_from_dex(&mut self) -> Result<(), Vec<TransactionError>> {
+    pub async fn retry_withdraw_from_dex(&mut self) -> Result<(), Vec<Error>> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Withdraw);
 
         let human_readable =
@@ -92,8 +107,31 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 )
                 .await;
 
-            if let Err(err) = response {
-                errors.push(err);
+            // If withdrawal has previously failed and before retrying it,
+            // the symbol of the asset changes, hence, we need to check the
+            // ID of its corresponding ledger canister.
+            match response {
+                Ok(claim_reply) => {
+                    self.with_balances_mut(|balances| {
+                        let asset = if balances
+                            .asset_0
+                            .ledger_caniser_id_match(claim_reply.canister_id)
+                        {
+                            balances.asset_0
+                        } else {
+                            balances.asset_1
+                        };
+
+                        let amount = decode_nat_to_u64(claim_reply.amount).unwrap();
+                        balances.move_asset(
+                            &asset,
+                            Party::External,
+                            Party::TreasuryManager,
+                            amount,
+                        );
+                    });
+                }
+                Err(err) => errors.push(err),
             }
         }
 
@@ -108,7 +146,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedBalances, Vec<TransactionError>> {
+    ) -> Result<ValidatedBalances, Vec<Error>> {
         let mut errors = vec![];
 
         if let Err(err) = self.withdraw_from_dex().await {
@@ -127,10 +165,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )
             .await
         {
-            Ok(amounts) => Some(amounts),
+            Ok(returned_amounts) => Ok(returned_amounts),
             Err(err) => {
-                errors.extend(err.into_iter());
-                None
+                errors.extend(err.clone());
+                Err(err)
             }
         };
 
@@ -138,6 +176,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(errors);
         }
 
-        Ok(returned_amounts.unwrap())
+        returned_amounts
     }
 }

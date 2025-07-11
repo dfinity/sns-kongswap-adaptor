@@ -12,8 +12,8 @@ use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
 use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
 use sns_treasury_manager::{
-    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest,
-    Transaction, TransactionError, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
+    Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest, Error,
+    ErrorKind, Transaction, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
     WithdrawRequest,
 };
 use state::KongSwapAdaptor;
@@ -108,6 +108,11 @@ fn log(msg: &str) {
 
 impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
+        // Before withdrawing we reresh the balances of all parties
+        // in the system.
+        let mut kong_adaptor = canister_state();
+        kong_adaptor.refresh_balances().await;
+
         let (ledger_0, ledger_1) = self.ledgers();
 
         let (default_owner_0, default_owner_1) = self.owner_accounts();
@@ -123,10 +128,11 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
             request,
         )
             .try_into()
-            .map_err(|err| {
-                vec![TransactionError::Precondition {
-                    error: err,
+            .map_err(|err: String| {
+                vec![Error {
                     code: u64::from(TransactionErrorCodes::PreConditionCode),
+                    message: err.to_string(),
+                    kind: ErrorKind::Precondition {},
                 }]
             })?;
 
@@ -142,10 +148,11 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request.try_into().map_err(|err| {
-            vec![TransactionError::Precondition {
-                error: err,
+        } = request.try_into().map_err(|err: String| {
+            vec![Error {
                 code: u64::from(TransactionErrorCodes::PreConditionCode),
+                message: err.to_string(),
+                kind: ErrorKind::Precondition {},
             }]
         })?;
 
@@ -169,8 +176,9 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         Ok(Balances::from(self.get_cached_balances()))
     }
 
+    // TODO this function can return the balances as well
     async fn refresh_balances(&mut self) {
-        let result = self.refresh_balances_impl().await;
+        let result = self.refresh_external_balances().await;
 
         if let Err(err) = result {
             log_err(&format!(

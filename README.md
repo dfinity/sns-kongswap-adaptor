@@ -24,9 +24,13 @@ Release version:
 ./scripts/build.py
 ```
 
-# Testing
+Debug version:
 
-Assuming the required repositories were cloned into `$HOME`:
+```
+./scripts/build.py --debug
+```
+
+# Testing
 
 ```
 ./scripts/test.py
