@@ -58,6 +58,9 @@ def get_test_environment(paths):
     # Download mainnet canisters if needed
     download_mainnet_canisters(paths)
     
+    # Download kong backend if needed
+    download_kong_backend(paths)
+    
     artifacts_dir = paths['project_dir'] / "ic-artifacts"
     
     env = os.environ.copy()
@@ -65,7 +68,7 @@ def get_test_environment(paths):
         "KONGSWAP_ADAPTOR_CANISTER_WASM_PATH": str(paths['wasm_dir'] / paths['kongswap_canister_gz']),
         "IC_ICRC1_LEDGER_WASM_PATH": str(artifacts_dir / "mainnet-sns-ledger.wasm.gz"),
         "MAINNET_ICP_LEDGER_CANISTER_WASM_PATH": str(artifacts_dir / "mainnet-icp-ledger.wasm.gz"),
-        "KONG_BACKEND_CANISTER_WASM_PATH": str(paths['home'] / "kong" / "target" / "wasm32-unknown-unknown" / "release" / "kong_backend.wasm"),
+        "KONG_BACKEND_CANISTER_WASM_PATH": str(artifacts_dir / "kong_backend.wasm.gz"),
     })
     
     return env
@@ -152,3 +155,69 @@ def download_mainnet_canisters(paths):
             sys.exit(1)
     
     print(f"All mainnet canisters downloaded to {artifacts_dir}")
+
+def load_config(paths):
+    """Load configuration from config.json."""
+    import json
+    
+    config_file = paths['project_dir'] / "config.json"
+    if not config_file.exists():
+        print(f"Error: Configuration file not found: {config_file}")
+        sys.exit(1)
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+    except Exception as e:
+        print(f"Error reading config.json: {e}")
+        sys.exit(1)
+    
+    # Validate required configuration keys
+    if "dependencies" not in config:
+        print("Error: Missing 'dependencies' section in config.json")
+        sys.exit(1)
+    
+    if "kong_backend" not in config["dependencies"]:
+        print("Error: Missing 'kong_backend' configuration in dependencies")
+        sys.exit(1)
+    
+    kong_config = config["dependencies"]["kong_backend"]
+    required_keys = ["version", "url_template"]
+    
+    for key in required_keys:
+        if key not in kong_config:
+            print(f"Error: Missing required key '{key}' in kong_backend configuration")
+            sys.exit(1)
+    
+    return config
+
+def download_kong_backend(paths):
+    """Download kong_backend.wasm.gz from GitHub releases."""
+    import urllib.request
+    
+    config = load_config(paths)
+    kong_config = config["dependencies"]["kong_backend"]
+    
+    artifacts_dir = paths['project_dir'] / "ic-artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
+    
+    dest_path = artifacts_dir / "kong_backend.wasm.gz"
+    
+    # Skip if already exists
+    if dest_path.exists():
+        print(f"Kong Backend already exists: {dest_path}")
+        return
+    
+    version = kong_config["version"]
+    download_url = kong_config["url_template"].format(version=version)
+    
+    print(f"Downloading Kong Backend from GitHub...")
+    print(f"  Version: {version}")
+    print(f"  URL: {download_url}")
+    
+    try:
+        urllib.request.urlretrieve(download_url, dest_path)
+        print(f"  Downloaded Kong Backend -> {dest_path}")
+    except Exception as e:
+        print(f"Error downloading Kong Backend: {e}")
+        sys.exit(1)
