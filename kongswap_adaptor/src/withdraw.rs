@@ -1,6 +1,8 @@
 use crate::{
     balances::{Party, ValidatedBalances},
-    kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
+    kong_types::{
+        ClaimArgs, ClaimReply, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply,
+    },
     tx_error_codes::TransactionErrorCodes,
     validation::decode_nat_to_u64,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
@@ -64,8 +66,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // TODO Unwrapping
         let amount_0 = decode_nat_to_u64(amount_0 + lp_fee_0).unwrap();
         let amount_1 = decode_nat_to_u64(amount_1 + lp_fee_1).unwrap();
-        self.move_asset(&asset_0, amount_0, Party::External, Party::TreasuryManager);
-        self.move_asset(&asset_1, amount_1, Party::External, Party::TreasuryManager);
+        self.move_asset(asset_0, amount_0, Party::External, Party::TreasuryManager);
+        self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
 
         Ok(())
     }
@@ -113,27 +115,44 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             // the symbol of the asset changes, hence, we need to check the
             // ID of its corresponding ledger canister.
             match response {
-                Ok(claim_reply) => {
-                    self.with_balances_mut(|balances| {
-                        let asset = if balances
-                            .asset_0
-                            .ledger_caniser_id_match(claim_reply.canister_id)
-                        {
-                            balances.asset_0
-                        } else {
-                            balances.asset_1
-                        };
-
-                        let amount = decode_nat_to_u64(claim_reply.amount).unwrap();
-                        balances.move_asset(
-                            &asset,
-                            Party::External,
-                            Party::TreasuryManager,
-                            amount,
-                        );
-                    });
+                Ok(ClaimReply {
+                    canister_id: Some(canister_id),
+                    amount,
+                    ..
+                }) => {
+                    if let Some(asset) = self.get_asset_for_ledger(&canister_id) {
+                        match decode_nat_to_u64(amount) {
+                            Ok(amount) => {
+                                self.move_asset(
+                                    asset,
+                                    amount,
+                                    Party::External,
+                                    Party::TreasuryManager,
+                                );
+                            }
+                            Err(err) => {
+                                errors.push(Error::new_postcondition(format!(
+                                    "Failed to decode amount for claim ID {}: {}",
+                                    claim_id, err
+                                )));
+                            }
+                        }
+                    } else {
+                        errors.push(Error::new_postcondition(format!(
+                            "Cannot identify asset for ledger `{}` for claim ID {}",
+                            canister_id, claim_id
+                        )));
+                    }
                 }
-                Err(err) => errors.push(err),
+                Ok(_) => {
+                    errors.push(Error::new_postcondition(format!(
+                        "Claim for claim ID {} returned no ledger canister ID.",
+                        claim_id
+                    )));
+                }
+                Err(err) => {
+                    errors.push(err);
+                }
             }
         }
 

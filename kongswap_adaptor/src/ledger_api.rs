@@ -128,7 +128,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             match result {
                 Ok(_) => {
                     self.move_asset(
-                        &asset,
+                        asset,
                         amount_decimals,
                         Party::TreasuryManager,
                         Party::TreasuryOwner,

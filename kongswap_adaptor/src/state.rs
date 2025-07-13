@@ -34,16 +34,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
     }
 
-    /// This is safe to call only after the canister has been initialized.
-    pub fn get_cached_balances(&self) -> ValidatedBalances {
-        self.balances.with_borrow(|balances| {
-            let ConfigState::Initialized(balances) = balances.get() else {
-                ic_cdk::trap("BUG: Balances should be initialized");
-            };
-            balances.clone()
-        })
-    }
-
     pub fn initialize(
         &self,
         asset_0: ValidatedAsset,
@@ -88,6 +78,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         })
     }
 
+    /// Returns a copy of the balances.
+    ///
+    /// Only safe to call after the canister has been initialized.
+    pub fn get_cached_balances(&self) -> ValidatedBalances {
+        self.balances.with_borrow(|cell| {
+            let ConfigState::Initialized(balances) = cell.get() else {
+                ic_cdk::trap("BUG: Balances should be initialized");
+            };
+
+            balances.clone()
+        })
+    }
+
     pub fn assets(&self) -> (ValidatedAsset, ValidatedAsset) {
         let validated_balances = self.get_cached_balances();
         (validated_balances.asset_0, validated_balances.asset_1)
@@ -113,7 +116,18 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.with_balances_mut(|validated_balances| validated_balances.charge_fee(asset));
     }
 
-    pub fn move_asset(&mut self, asset: &ValidatedAsset, amount: u64, from: Party, to: Party) {
+    pub fn get_asset_for_ledger(&self, canister_id: &String) -> Option<ValidatedAsset> {
+        let (asset_0, asset_1) = self.assets();
+        if asset_0.ledger_canister_id().to_string() == *canister_id {
+            Some(asset_0)
+        } else if asset_1.ledger_canister_id().to_string() == *canister_id {
+            Some(asset_1)
+        } else {
+            None
+        }
+    }
+
+    pub fn move_asset(&mut self, asset: ValidatedAsset, amount: u64, from: Party, to: Party) {
         self.with_balances_mut(|validated_balances| {
             validated_balances.move_asset(asset, from, to, amount)
         });
@@ -152,8 +166,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         last_entry.operation.step.is_final = true;
 
-        self.push_audit_trail_transaction(last_entry.clone());
-
-        ic_cdk::println!("Audit trail transaction finalized: {:?}", last_entry);
+        self.push_audit_trail_transaction(last_entry);
     }
 }

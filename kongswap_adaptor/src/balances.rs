@@ -171,14 +171,14 @@ impl ValidatedBalances {
     // TODO[ATG]: Let's discuss this in detail.
     pub(crate) fn move_asset(
         &mut self,
-        asset: &ValidatedAsset,
+        asset: ValidatedAsset,
         from: Party,
         to: Party,
         amount: u64,
     ) {
-        let validated_balance_book = if *asset == self.asset_0 {
+        let balance_book = if asset == self.asset_0 {
             &mut self.asset_0_balance
-        } else if *asset == self.asset_1 {
+        } else if asset == self.asset_1 {
             &mut self.asset_1_balance
         } else {
             log_err(&format!(
@@ -191,25 +191,24 @@ impl ValidatedBalances {
 
         match (&from, &to) {
             (Party::External, Party::TreasuryManager) => {
-                validated_balance_book.external -= amount;
-                validated_balance_book.treasury_manager.amount_decimals +=
+                balance_book.external -= amount;
+                balance_book.treasury_manager.amount_decimals +=
                     amount - asset.ledger_fee_decimals();
             }
             (Party::TreasuryManager, Party::TreasuryOwner) => {
-                validated_balance_book.treasury_manager.amount_decimals -= amount;
-                validated_balance_book.treasury_owner.amount_decimals +=
-                    amount - asset.ledger_fee_decimals();
+                balance_book.treasury_manager.amount_decimals -= amount;
+                balance_book.treasury_owner.amount_decimals += amount - asset.ledger_fee_decimals();
             }
             (Party::TreasuryManager, Party::External) => {
-                validated_balance_book.external += amount - asset.ledger_fee_decimals();
-                validated_balance_book.treasury_manager.amount_decimals -= amount;
+                balance_book.external += amount - asset.ledger_fee_decimals();
+                balance_book.treasury_manager.amount_decimals -= amount;
             }
             _ => {
                 log_err(&format!("Invalid asset movement from {} to {}", from, to));
             }
         }
 
-        validated_balance_book.fee_collector += asset.ledger_fee_decimals();
+        balance_book.fee_collector += asset.ledger_fee_decimals();
     }
 
     pub(crate) fn charge_fee(&mut self, asset: &ValidatedAsset) {

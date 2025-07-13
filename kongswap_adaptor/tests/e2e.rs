@@ -7,7 +7,7 @@ use ic_icrc1_ledger::{InitArgsBuilder, LedgerArgument};
 use ic_management_canister_types::CanisterSettings;
 use icp_ledger::{AccountIdentifier, LedgerCanisterInitPayload};
 use icrc_ledger_types::icrc1::{account::Account, transfer::TransferArg};
-use kongswap_adaptor::{agent::AbstractAgent, audit::serialize_audit_trail};
+use kongswap_adaptor::agent::AbstractAgent;
 use lazy_static::lazy_static;
 use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder};
 use pocket_ic_agent::PocketIcAgent;
@@ -224,10 +224,11 @@ async fn e2e_test() {
     assert_eq!(balances_after_second_upgrade, balances_before_upgrade);
     assert_eq!(audit_trail_after_second_upgrade, audit_trail_before_upgrade);
 
-    panic!(
-        "audit_trail = {}",
-        serialize_audit_trail(&audit_trail_after_second_upgrade, true).unwrap()
-    );
+    // use kongswap_adaptor::audit::serialize_audit_trail;
+    // panic!(
+    //     "audit_trail = {}",
+    //     serialize_audit_trail(&audit_trail_after_second_upgrade, true).unwrap()
+    // );
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
