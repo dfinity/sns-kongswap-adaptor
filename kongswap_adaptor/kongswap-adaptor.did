@@ -202,7 +202,7 @@ type Transfer = record {
 // ```candid
 // transactions = vec {
 //   record {
-//     treasury_manager_operation = {
+//     operation = {
 //       operation = Deposit;
 //       step = record {
 //         index = 0;
@@ -212,7 +212,7 @@ type Transfer = record {
 //     ...
 //   };
 //   record {
-//     treasury_manager_operation = {
+//     operation = {
 //       operation = Deposit;
 //       step = record {
 //         index = 1;

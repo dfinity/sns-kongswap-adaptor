@@ -1,5 +1,4 @@
 use crate::state::storage::{ConfigState, StableTransaction};
-use crate::tx_error_codes::TransactionErrorCodes;
 use crate::validation::{
     ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
@@ -10,10 +9,11 @@ use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemor
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
 use kongswap_adaptor::agent::AbstractAgent;
+use kongswap_adaptor::audit::OperationContext;
 use lazy_static::lazy_static;
 use sns_treasury_manager::{
     Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest, Error,
-    ErrorKind, Transaction, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
+    Operation, Transaction, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
     WithdrawRequest,
 };
 use state::KongSwapAdaptor;
@@ -108,11 +108,6 @@ fn log(msg: &str) {
 
 impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
-        // Before withdrawing we reresh the balances of all parties
-        // in the system.
-        let mut kong_adaptor = canister_state();
-        kong_adaptor.refresh_balances().await;
-
         let (ledger_0, ledger_1) = self.ledgers();
 
         let (default_owner_0, default_owner_1) = self.owner_accounts();
@@ -128,18 +123,16 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
             request,
         )
             .try_into()
-            .map_err(|err: String| {
-                vec![Error {
-                    code: u64::from(TransactionErrorCodes::PreConditionCode),
-                    message: err.to_string(),
-                    kind: ErrorKind::Precondition {},
-                }]
-            })?;
+            .map_err(|err: String| vec![Error::new_precondition(err)])?;
+
+        let mut context = OperationContext::new(Operation::Withdraw);
 
         let returned_amounts = self
-            .withdraw_impl(withdraw_account_0, withdraw_account_1)
+            .withdraw_impl(&mut context, withdraw_account_0, withdraw_account_1)
             .await
             .map(Balances::from)?;
+
+        self.finalize_audit_trail_transaction(context);
 
         Ok(returned_amounts)
     }
@@ -148,18 +141,21 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
-        } = request.try_into().map_err(|err: String| {
-            vec![Error {
-                code: u64::from(TransactionErrorCodes::PreConditionCode),
-                message: err.to_string(),
-                kind: ErrorKind::Precondition {},
-            }]
-        })?;
+        } = request
+            .try_into()
+            .map_err(|err: String| vec![Error::new_precondition(err)])?;
+
+        self.validate_deposit_args(allowance_0, allowance_1)
+            .map_err(|err| vec![err])?;
+
+        let mut context = OperationContext::new(Operation::Deposit);
 
         let deposited_amounts = self
-            .deposit_impl(allowance_0, allowance_1)
+            .deposit_impl(&mut context, allowance_0, allowance_1)
             .await
             .map(Balances::from)?;
+
+        self.finalize_audit_trail_transaction(context);
 
         Ok(deposited_amounts)
     }
@@ -176,24 +172,28 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
         Ok(Balances::from(self.get_cached_balances()))
     }
 
-    // TODO this function can return the balances as well
     async fn refresh_balances(&mut self) {
-        let result = self.refresh_external_balances().await;
+        let mut context = OperationContext::new(Operation::Balances);
+
+        let result = self.refresh_balances_impl(&mut context).await;
 
         if let Err(err) = result {
-            log_err(&format!(
-                "KongSwapAdaptor refresh_balances failed: {:?}",
-                err
-            ));
+            log_err(&format!("refresh_balances failed: {:?}", err));
         }
+
+        self.finalize_audit_trail_transaction(context);
     }
 
     async fn issue_rewards(&mut self) {
-        let result = self.issue_rewards_impl().await;
+        let mut context = OperationContext::new(Operation::IssueReward);
+
+        let result = self.issue_rewards_impl(&mut context).await;
 
         if let Err(err) = result {
-            log_err(&format!("KongSwapAdaptor issue_rewards failed: {:?}", err));
+            log_err(&format!("issue_rewards failed: {:?}", err));
         }
+
+        self.finalize_audit_trail_transaction(context);
     }
 }
 

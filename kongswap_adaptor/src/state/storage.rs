@@ -38,7 +38,7 @@ pub(crate) struct StableTransaction {
     pub canister_id: Principal,
     pub result: Result<TransactionWitness, Error>,
     pub human_readable: String,
-    pub treasury_manager_operation: TreasuryManagerOperation,
+    pub operation: TreasuryManagerOperation,
 }
 
 impl Storable for StableTransaction {
@@ -64,7 +64,7 @@ impl From<StableTransaction> for Transaction {
             canister_id: item.canister_id,
             result: item.result,
             purpose: item.human_readable,
-            treasury_manager_operation: item.treasury_manager_operation,
+            treasury_manager_operation: item.operation,
         }
     }
 }
@@ -76,7 +76,7 @@ impl From<Transaction> for StableTransaction {
             canister_id: item.canister_id,
             result: item.result,
             human_readable: item.purpose,
-            treasury_manager_operation: item.treasury_manager_operation,
+            operation: item.treasury_manager_operation,
         }
     }
 }

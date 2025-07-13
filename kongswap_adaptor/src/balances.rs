@@ -9,9 +9,12 @@ use crate::{
 };
 use candid::{CandidType, Principal};
 use icrc_ledger_types::{icrc::generic_metadata_value::MetadataValue, icrc1::account::Account};
-use kongswap_adaptor::agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent};
+use kongswap_adaptor::{
+    agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent},
+    audit::OperationContext,
+};
 use serde::Deserialize;
-use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind};
 
 /// This enumeration indicates which entity in our eco-system,
 /// we are talking about. The naming Party is used to avoid confusion
@@ -148,11 +151,7 @@ impl ValidatedBalances {
 
     // This function updates the distribution of balances for a given asset
     // over all parties (treasury owner, manager, external, ...)
-    pub(crate) fn refresh_external_custodian_balance(
-        &mut self,
-        asset: &ValidatedAsset,
-        balance: u64,
-    ) {
+    pub(crate) fn set_external_custodian_balance(&mut self, asset: &ValidatedAsset, balance: u64) {
         let validated_balance_book = if *asset == self.asset_0 {
             &mut self.asset_0_balance
         } else if *asset == self.asset_1 {
@@ -169,6 +168,7 @@ impl ValidatedBalances {
         validated_balance_book.external = balance;
     }
 
+    // TODO[ATG]: Let's discuss this in detail.
     pub(crate) fn move_asset(
         &mut self,
         asset: &ValidatedAsset,
@@ -235,7 +235,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
     pub async fn refresh_ledger_metadata(
         &mut self,
-        operation: TreasuryManagerOperation,
+        context: &mut OperationContext,
     ) -> Result<(), Error> {
         let (asset_0, asset_1) = self.assets();
 
@@ -255,9 +255,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
                 let result = self
                     .emit_transaction(
+                        context.next_operation(),
                         *KONG_BACKEND_CANISTER_ID,
                         UpdateTokenArgs { token },
-                        operation,
                         human_readable,
                     )
                     .await;
@@ -278,9 +278,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
             let reply = self
                 .emit_transaction(
+                    context.next_operation(),
                     ledger_canister_id,
                     Icrc1MetadataRequest {},
-                    operation,
                     human_readable,
                 )
                 .await?;
@@ -359,14 +359,15 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
-    pub async fn refresh_external_balances(&mut self) -> Result<ValidatedBalances, Error> {
-        let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Balances);
-
-        if let Err(err) = self.refresh_ledger_metadata(operation).await {
+    pub async fn refresh_balances_impl(
+        &mut self,
+        context: &mut OperationContext,
+    ) -> Result<ValidatedBalances, Error> {
+        if let Err(err) = self.refresh_ledger_metadata(context).await {
             log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
         }
 
-        let remove_lp_token_amount = self.lp_balance(operation).await?;
+        let remove_lp_token_amount = self.lp_balance(context).await?;
 
         let human_readable = format!(
             "Calling KongSwapBackend.remove_liquidity_amounts to estimate how much liquidity can be removed for LP token amount {}.",
@@ -383,9 +384,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let reply = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await?;
@@ -410,7 +411,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 .iter()
                 .zip([balance_0_decimals, balance_1_decimals].iter())
             {
-                validated_balances.refresh_external_custodian_balance(asset, balance);
+                validated_balances.set_external_custodian_balance(asset, balance);
             }
         });
 

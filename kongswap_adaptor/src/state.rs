@@ -1,13 +1,13 @@
 use crate::{
     balances::{Party, ValidatedBalances},
     log_err,
-    state::storage::ConfigState,
+    state::storage::{ConfigState, StableTransaction},
     validation::ValidatedAsset,
     StableAuditTrail, StableBalances,
 };
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
-use kongswap_adaptor::agent::AbstractAgent;
+use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use std::{cell::RefCell, thread::LocalKey};
 
 pub(crate) mod storage;
@@ -117,5 +117,43 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.with_balances_mut(|validated_balances| {
             validated_balances.move_asset(asset, from, to, amount)
         });
+    }
+
+    fn with_audit_trail_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StableAuditTrail) -> R,
+    {
+        self.audit_trail
+            .with_borrow_mut(|audit_trail| f(audit_trail))
+    }
+
+    pub fn push_audit_trail_transaction(&self, transaction: StableTransaction) {
+        self.with_audit_trail_mut(|audit_trail| {
+            if let Err(err) = audit_trail.push(&transaction) {
+                log_err(&format!(
+                    "Cannot push transaction to audit trail: {}\ntransaction: {:?}",
+                    err, transaction
+                ));
+            }
+        });
+    }
+
+    pub fn finalize_audit_trail_transaction(&self, context: OperationContext) {
+        let last_entry = self.with_audit_trail_mut(|audit_trail| audit_trail.pop());
+
+        let Some(mut last_entry) = last_entry else {
+            log_err(&format!(
+                "Audit trail is empty despite the operation beign successfully completed. \
+                     Operation context: {:?}",
+                context,
+            ));
+            return;
+        };
+
+        last_entry.operation.step.is_final = true;
+
+        self.push_audit_trail_transaction(last_entry.clone());
+
+        ic_cdk::println!("Audit trail transaction finalized: {:?}", last_entry);
     }
 }
