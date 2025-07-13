@@ -227,6 +227,19 @@ impl ValidatedAsset {
     }
 }
 
+impl ValidatedAsset {
+    pub(crate) fn ledger_caniser_id_match(
+        &self,
+        string_ledger_canister_id: Option<String>,
+    ) -> bool {
+        match self {
+            ValidatedAsset::Token {
+                ledger_canister_id, ..
+            } => Some(ledger_canister_id.to_text()) == string_ledger_canister_id,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct ValidatedAllowance {
     pub asset: ValidatedAsset,

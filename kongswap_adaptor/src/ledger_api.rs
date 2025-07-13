@@ -10,7 +10,7 @@ use icrc_ledger_types::icrc1::{
     transfer::{Memo, TransferArg},
 };
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManager, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn get_ledger_balance_decimals(
@@ -21,7 +21,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_canister_id = asset.ledger_canister_id();
 
         let request = Account {
-            owner: ic_cdk::api::id(),
+            owner: self.id,
             subaccount: None,
         };
 
@@ -134,6 +134,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         if !withdraw_errors.is_empty() {
             return Err(withdraw_errors);
         }
+
+        self.refresh_balances().await;
 
         Ok(())
     }

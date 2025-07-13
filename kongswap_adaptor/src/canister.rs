@@ -77,7 +77,7 @@ thread_local! {
 }
 
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
-    KongSwapAdaptor::new(CdkAgent::new(), &BALANCES, &AUDIT_TRAIL)
+    KongSwapAdaptor::new(CdkAgent::new(), ic_cdk::id(), &BALANCES, &AUDIT_TRAIL)
 }
 
 fn check_access() {
@@ -324,6 +324,12 @@ fn canister_post_upgrade(arg: TreasuryManagerArg) {
 
     init_periodic_tasks();
 }
+
+/// Used in order to commit the canister state, which requires an inter-canister call.
+/// Otherwise, a trap could discard the state mutations, complicating recovery.
+/// See: https://internetcomputer.org/docs/building-apps/security/inter-canister-calls#journaling
+#[update(hidden = true)]
+fn commit_state() {}
 
 fn candid_service() -> String {
     candid::export_service!();

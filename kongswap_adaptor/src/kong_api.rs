@@ -54,7 +54,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn lp_balance(&mut self, operation: TreasuryManagerOperation) -> Result<Nat, Error> {
         let request = UserBalancesArgs {
-            principal_id: ic_cdk::api::id().to_string(),
+            principal_id: self.id.to_string(),
         };
 
         let human_readable =

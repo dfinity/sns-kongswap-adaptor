@@ -1,7 +1,9 @@
 use crate::{
     balances::{Party, ValidatedBalances},
+    balances::{Party, ValidatedBalances},
     kong_types::{ClaimArgs, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply},
     tx_error_codes::TransactionErrorCodes,
+    validation::decode_nat_to_u64,
     validation::decode_nat_to_u64,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -97,7 +99,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .emit_transaction(
                 *KONG_BACKEND_CANISTER_ID,
                 ClaimsArgs {
-                    principal_id: ic_cdk::api::id().to_string(),
+                    principal_id: self.id.to_string(),
                 },
                 operation,
                 human_readable,
