@@ -1,5 +1,5 @@
 use crate::{
-    balances::{Party, ValidatedBalances},
+    balances::Party,
     state::KongSwapAdaptor,
     tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset},
@@ -10,7 +10,7 @@ use icrc_ledger_types::icrc1::{
     transfer::{Memo, TransferArg},
 };
 use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{Error, ErrorKind, TreasuryManager, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn get_ledger_balance_decimals(
@@ -67,7 +67,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         operation: TreasuryManagerOperation,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedBalances, Vec<Error>> {
+    ) -> Result<(), Vec<Error>> {
         let (asset_0, asset_1) = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
@@ -135,7 +135,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return Err(withdraw_errors);
         }
 
-        self.refresh_balances().await;
-        Ok(self.get_cached_balances())
+        Ok(())
     }
 }
