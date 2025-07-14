@@ -34,13 +34,13 @@ def get_project_paths():
     # In CI, use the current working directory
     if os.environ.get('GITHUB_ACTIONS'):
         PROJECT_DIR = Path.cwd()
-        IC_PATH = PROJECT_DIR.parent
+        IC_DIR = PROJECT_DIR.parent
         
         # Debug: Print the detected paths
         print(f"[CI] Current working directory: {PROJECT_DIR}")
         print(f"[CI] Project contents: {list(PROJECT_DIR.iterdir())}")
-        print(f"[CI] IC directory: {IC_PATH}")
-        print(f"[CI] IC contents: {list(IC_PATH.iterdir())}")
+        print(f"[CI] IC directory: {IC_DIR}")
+        print(f"[CI] IC contents: {list(IC_DIR.iterdir())}")
         
         # Verify workspace structure
         cargo_toml = PROJECT_DIR / "Cargo.toml"
@@ -58,12 +58,13 @@ def get_project_paths():
     else:
         # Local development
         PROJECT_DIR = Path.home() / "sns-kongswap-adaptor"
+        IC_DIR = Path.home() / "ic"
     
     WASM_DIR = PROJECT_DIR / "target" / "wasm32-unknown-unknown" / "release"
     CANDID = PROJECT_DIR / "kongswap_adaptor" / "kongswap-adaptor.did"
     
     return {
-        'ic_path': IC_PATH,
+        'ic_dir': IC_DIR,
         'project_dir': PROJECT_DIR,
         'wasm_dir': WASM_DIR,
         'candid': CANDID,
