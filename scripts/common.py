@@ -34,7 +34,26 @@ def get_project_paths():
     # In CI, use the current working directory
     if os.environ.get('GITHUB_ACTIONS'):
         PROJECT_DIR = Path.cwd()
-        HOME = PROJECT_DIR.parent.parent  # /home/runner
+        HOME = Path.home()  # Use actual home, not parent directories
+        
+        # Debug: Print the detected paths
+        print(f"[CI] Current working directory: {PROJECT_DIR}")
+        print(f"[CI] Home directory: {HOME}")
+        print(f"[CI] Project contents: {list(PROJECT_DIR.iterdir())}")
+        
+        # Verify workspace structure
+        cargo_toml = PROJECT_DIR / "Cargo.toml"
+        if cargo_toml.exists():
+            print(f"[CI] Found Cargo.toml at: {cargo_toml}")
+        else:
+            print(f"[CI] ERROR: No Cargo.toml found at: {cargo_toml}")
+            
+        kongswap_dir = PROJECT_DIR / "kongswap_adaptor"
+        if kongswap_dir.exists():
+            print(f"[CI] Found kongswap_adaptor directory at: {kongswap_dir}")
+        else:
+            print(f"[CI] ERROR: No kongswap_adaptor directory found at: {kongswap_dir}")
+            
     else:
         # Local development
         HOME = Path.home()

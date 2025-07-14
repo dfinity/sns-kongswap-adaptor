@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# filepath: /home/arshavir/sns-kongswap-adaptor/scripts/build.py
 
 import gzip
 import shutil
