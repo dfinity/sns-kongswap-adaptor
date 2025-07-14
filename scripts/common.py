@@ -34,12 +34,13 @@ def get_project_paths():
     # In CI, use the current working directory
     if os.environ.get('GITHUB_ACTIONS'):
         PROJECT_DIR = Path.cwd()
-        HOME = Path.home()  # Use actual home, not parent directories
+        IC_PATH = PROJECT_DIR.parent()
         
         # Debug: Print the detected paths
         print(f"[CI] Current working directory: {PROJECT_DIR}")
-        print(f"[CI] Home directory: {HOME}")
         print(f"[CI] Project contents: {list(PROJECT_DIR.iterdir())}")
+        print(f"[CI] IC directory: {IC_PATH}")
+        print(f"[CI] IC contents: {list(IC_PATH.iterdir())}")
         
         # Verify workspace structure
         cargo_toml = PROJECT_DIR / "Cargo.toml"
@@ -56,14 +57,13 @@ def get_project_paths():
             
     else:
         # Local development
-        HOME = Path.home()
-        PROJECT_DIR = HOME / "sns-kongswap-adaptor"
+        PROJECT_DIR = Path.home() / "sns-kongswap-adaptor"
     
     WASM_DIR = PROJECT_DIR / "target" / "wasm32-unknown-unknown" / "release"
     CANDID = PROJECT_DIR / "kongswap_adaptor" / "kongswap-adaptor.did"
     
     return {
-        'home': HOME,
+        'ic_path': IC_PATH,
         'project_dir': PROJECT_DIR,
         'wasm_dir': WASM_DIR,
         'candid': CANDID,
@@ -108,7 +108,7 @@ def download_mainnet_canisters(paths):
     import urllib.request
     
     # Validate IC directory exists
-    ic_dir = paths['home'] / "ic"
+    ic_dir = paths['ic_dir']
     
     if not ic_dir.exists():
         print(f"Error: IC directory does not exist: {ic_dir}")

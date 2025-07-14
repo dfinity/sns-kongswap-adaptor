@@ -18,6 +18,6 @@ jobs:
         with:
           python-version: '3.12'
       - run: wget -q https://github.com/dfinity/ic-wasm/releases/download/0.8.0/ic-wasm-linux64 -O /usr/local/bin/ic-wasm && chmod +x /usr/local/bin/ic-wasm
-      - run: git clone --depth 1 https://github.com/dfinity/ic.git $HOME/ic
+      - run: git clone --depth 1 https://github.com/dfinity/ic.git $PROJECT_DIR/ic
       - run: ./scripts/test.py --verbose
         timeout-minutes: 10
