@@ -1,0 +1,23 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@1.82.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - run: wget -q https://github.com/dfinity/ic-wasm/releases/download/0.8.0/ic-wasm-linux64 -O /usr/local/bin/ic-wasm && chmod +x /usr/local/bin/ic-wasm
+      - run: git clone --depth 1 https://github.com/dfinity/ic.git $HOME/ic
+      - run: ./scripts/test.py --verbose
+        timeout-minutes: 10
