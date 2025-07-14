@@ -52,7 +52,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.push_audit_trail_transaction(transaction);
 
         // Self-call to ensure that the state has been committed, to prevent state roll back in case
-        // of a panic that occurs before the next (meaningfuk) async operation. This is recommended:
+        // of a panic that occurs before the next (meaningful) async operation. This is recommended:
         // https://internetcomputer.org/docs/building-apps/security/inter-canister-calls#journaling
         if let Err(err) = self.agent.call(self.id, CommitStateRequest {}).await {
             log_err(&format!(

@@ -329,7 +329,9 @@ fn canister_post_upgrade(arg: TreasuryManagerArg) {
 /// Otherwise, a trap could discard the state mutations, complicating recovery.
 /// See: https://internetcomputer.org/docs/building-apps/security/inter-canister-calls#journaling
 #[update(hidden = true)]
-fn commit_state() {}
+fn commit_state() {
+    check_access();
+}
 
 fn candid_service() -> String {
     candid::export_service!();
