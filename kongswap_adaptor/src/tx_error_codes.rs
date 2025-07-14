@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub(crate) enum TransactionErrorCodes {
     PreConditionCode,
     PostConditionCode,

@@ -1,5 +1,5 @@
 use crate::{
-    balances::{Party, ValidatedBalances},
+    balances::Party,
     state::KongSwapAdaptor,
     tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset},
@@ -72,7 +72,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         context: &mut OperationContext,
         withdraw_account_0: Account,
         withdraw_account_1: Account,
-    ) -> Result<ValidatedBalances, Vec<Error>> {
+    ) -> Result<(), Vec<Error>> {
         let (asset_0, asset_1) = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
@@ -146,6 +146,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
-        Ok(self.get_cached_balances())
+        Ok(())
     }
 }

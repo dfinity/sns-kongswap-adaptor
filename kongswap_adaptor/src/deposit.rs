@@ -184,9 +184,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         context: &mut OperationContext,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<(), Error> {
+    ) -> Result<(), Vec<Error>> {
         self.set_dex_allowances(context, allowance_0, allowance_1)
-            .await?;
+            .await
+            .map_err(|err| vec![err])?;
+
+        let balances_before = self.get_ledger_balances(context).await?;
 
         let result = self.add_pool(context, allowance_0, allowance_1).await;
 
@@ -198,9 +201,27 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         {
             if self.is_pool_already_deployed_error(message) {
                 // If the pool already exists, we can proceed with a top-up.
-                self.topup_pool(context, allowance_0, allowance_1).await?;
+                self.topup_pool(context, allowance_0, allowance_1).await
+                    .map_err(|err| vec![err])?;
             }
         }
+
+        let balances_after = self.get_ledger_balances(context).await?;
+
+        self.find_discrepency(
+            &allowance_0.asset,
+            balances_before.0,
+            balances_after.0,
+            allowance_0.amount_decimals,
+            true,
+        );
+        self.find_discrepency(
+            &allowance_1.asset,
+            balances_before.1,
+            balances_after.1,
+            allowance_1.amount_decimals,
+            true,
+        );
 
         Ok(())
     }
@@ -227,7 +248,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             Nat::from(allowance_1.amount_decimals),
             Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_1.asset.ledger_fee_decimals(),
         );
-        // Step 2. Ensure the tokens are registered with the DEX.
+        // Step 1. Ensure the tokens are registered with the DEX.
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.
         // - The ICP token is assumed to have index 2.
@@ -235,10 +256,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.maybe_add_token(context, ledger_0).await?;
         self.maybe_add_token(context, ledger_1).await?;
 
-        // Step 3. Fetch the latest ledger metadata, including symbols and ledger fees.
+        // Step 2. Fetch the latest ledger metadata, including symbols and ledger fees.
+        // TODO: We could tolerate an error here and try to move forward.
         self.refresh_ledger_metadata(context).await?;
 
-        // Step 4. Ensure the pool exists.
+        // Step 3. Ensure the pool exists.
 
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
@@ -271,6 +293,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, Vec<Error>> {
+        {
+            self.add_manager_balance(&allowance_0.asset, allowance_0.amount_decimals);
+            self.add_manager_balance(&allowance_1.asset, allowance_1.amount_decimals);
+        }
+
         let deposit_into_dex_result = self
             .deposit_into_dex(context, allowance_0, allowance_1)
             .await;
@@ -284,12 +311,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await;
 
         match (deposit_into_dex_result, returned_amounts_result) {
-            (Ok(_), Ok(returned_amounts)) => Ok(returned_amounts),
+            (Ok(_), Ok(_)) => Ok(self.get_cached_balances()),
             (Ok(_), Err(errs)) => Err(errs),
-            (Err(err), Ok(_)) => Err(vec![err]),
-            (Err(err_1), Err(errs_2)) => {
-                let mut errs = vec![err_1];
-                errs.extend(errs_2.into_iter());
+            (Err(errs), Ok(_)) => Err(errs),
+            (Err(mut errs), Err(errs_1)) => {
+                errs.extend(errs_1.into_iter());
                 Err(errs)
             }
         }

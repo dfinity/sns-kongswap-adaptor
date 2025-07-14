@@ -16,6 +16,7 @@ use kongswap_adaptor::{
 use serde::Deserialize;
 use sns_treasury_manager::{Error, ErrorKind};
 
+#[allow(dead_code)]
 /// This enumeration indicates which entity in our eco-system,
 /// we are talking about. The naming Party is used to avoid confusion
 /// with the term `Account`.
@@ -149,8 +150,8 @@ impl ValidatedBalances {
         }
     }
 
-    // This function updates the distribution of balances for a given asset
-    // over all parties (treasury owner, manager, external, ...)
+    // This function updates the distribution of balances for
+    // a given asset held by the external protocol.
     pub(crate) fn set_external_custodian_balance(&mut self, asset: &ValidatedAsset, balance: u64) {
         let validated_balance_book = if *asset == self.asset_0 {
             &mut self.asset_0_balance
@@ -166,6 +167,47 @@ impl ValidatedBalances {
         };
 
         validated_balance_book.external = balance;
+    }
+
+    pub(crate) fn add_manager_balance(&mut self, asset: &ValidatedAsset, amount: u64) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        validated_balance_book.treasury_manager.amount_decimals += amount;
+    }
+
+    // TODO[ATG]: Let's discuss this in detail.
+    pub(crate) fn move_asset(
+        &mut self,
+        asset: ValidatedAsset,
+        from: Party,
+        to: Party,
+        amount: u64,
+    ) {
+        let balance_book = if asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        validated_balance_book.treasury_manager.amount_decimals += amount;
     }
 
     // TODO[ATG]: Let's discuss this in detail.
@@ -227,6 +269,59 @@ impl ValidatedBalances {
 
         let fee = asset.ledger_fee_decimals();
         validated_balance_book.fee_collector += fee;
+    }
+
+    pub(crate) fn find_deposit_discrepency(
+        &mut self,
+        asset: &ValidatedAsset,
+        balance_before: u64,
+        balance_after: u64,
+        transferred_amount: u64,
+    ) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        if balance_after.abs_diff(balance_before) > asset.ledger_fee_decimals() + transferred_amount
+        {
+            validated_balance_book.suspense += balance_before
+                .abs_diff(balance_after + asset.ledger_fee_decimals() + transferred_amount);
+        }
+    }
+
+    pub(crate) fn find_withdraw_discrepency(
+        &mut self,
+        asset: &ValidatedAsset,
+        balance_before: u64,
+        balance_after: u64,
+        transferred_amount: u64,
+    ) {
+        let validated_balance_book = if *asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if *asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        if balance_after.abs_diff(balance_before) < transferred_amount {
+            validated_balance_book.suspense +=
+                balance_after.abs_diff(balance_before + transferred_amount);
+        }
     }
 }
 
@@ -414,6 +509,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
         });
 
-        Ok(self.get_cached_balances())
+        Ok(())
     }
 }

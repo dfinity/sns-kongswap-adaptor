@@ -6,7 +6,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub async fn issue_rewards_impl(
         &mut self,
         context: &mut OperationContext,
-    ) -> Result<ValidatedBalances, Vec<Error>> {
+    ) -> Result<(), Vec<Error>> {
         // TODO: Ask DEX to send our rewards back.
 
         let (withdraw_account_0, withdraw_account_1) = self.owner_accounts();
@@ -15,6 +15,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .return_remaining_assets_to_owner(context, withdraw_account_0, withdraw_account_1)
             .await?;
 
-        Ok(returned_amounts)
+        Ok(())
     }
 }
