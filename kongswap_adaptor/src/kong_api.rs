@@ -3,13 +3,12 @@ use crate::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
-    tx_error_codes::TransactionErrorCodes,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::{Nat, Principal};
 use itertools::{Either, Itertools};
-use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{Error, ErrorKind, TreasuryManagerOperation};
+use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
+use sns_treasury_manager::Error;
 use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -20,8 +19,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub async fn maybe_add_token(
         &mut self,
+        context: &mut OperationContext,
         ledger_canister_id: Principal,
-        operation: TreasuryManagerOperation,
     ) -> Result<(), Error> {
         let token = format!("IC.{}", ledger_canister_id);
 
@@ -36,9 +35,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let response = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await;
@@ -52,7 +51,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
     }
 
-    pub async fn lp_balance(&mut self, operation: TreasuryManagerOperation) -> Result<Nat, Error> {
+    pub async fn lp_balance(&mut self, context: &mut OperationContext) -> Result<Nat, Error> {
         let request = UserBalancesArgs {
             principal_id: self.id.to_string(),
         };
@@ -62,9 +61,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let replies = self
             .emit_transaction(
+                context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
-                operation,
                 human_readable,
             )
             .await?;
@@ -87,21 +86,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         );
 
         if !errors.is_empty() {
-            return Err(Error {
-                code: u64::from(TransactionErrorCodes::BackendCode),
-                message: format!("Failed to convert balances: {:?}", errors.join(", ")),
-                kind: ErrorKind::Backend {},
-            });
+            return Err(Error::new_backend(format!(
+                "Failed to convert balances: {:?}",
+                errors.join(", ")
+            )));
         }
 
         let lp_token = self.lp_token();
 
         let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
-            return Err(Error {
-                code: u64::from(TransactionErrorCodes::BackendCode),
-                message: format!("Failed to get LP balance for {}.", lp_token),
-                kind: ErrorKind::Backend {},
-            });
+            return Err(Error::new_backend(format!(
+                "Failed to get LP balance for {}.",
+                lp_token
+            )));
         };
 
         Ok(balance)

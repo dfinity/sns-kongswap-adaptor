@@ -34,7 +34,7 @@ serde_json = "1.0.140"
 pretty_assertions = "1.4.1"
 
 [dev-dependencies]
-pocket-ic = { workspace = true }
+pocket-ic.workspace = true
 tokio = "1.45.1"
 ic-management-canister-types.workspace = true
 candid_parser = "0.1.2"

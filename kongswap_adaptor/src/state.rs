@@ -1,13 +1,13 @@
 use crate::{
     balances::{Party, ValidatedBalances},
     log_err,
-    state::storage::ConfigState,
+    state::storage::{ConfigState, StableTransaction},
     validation::ValidatedAsset,
     StableAuditTrail, StableBalances,
 };
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
-use kongswap_adaptor::agent::AbstractAgent;
+use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use std::{cell::RefCell, thread::LocalKey};
 
 pub(crate) mod storage;
@@ -32,16 +32,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             balances,
             audit_trail,
         }
-    }
-
-    /// This is safe to call only after the canister has been initialized.
-    pub fn get_cached_balances(&self) -> ValidatedBalances {
-        self.balances.with_borrow(|balances| {
-            let ConfigState::Initialized(balances) = balances.get() else {
-                ic_cdk::trap("BUG: Balances should be initialized");
-            };
-            balances.clone()
-        })
     }
 
     pub fn initialize(
@@ -88,6 +78,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         })
     }
 
+    /// Returns a copy of the balances.
+    ///
+    /// Only safe to call after the canister has been initialized.
+    pub fn get_cached_balances(&self) -> ValidatedBalances {
+        self.balances.with_borrow(|cell| {
+            let ConfigState::Initialized(balances) = cell.get() else {
+                ic_cdk::trap("BUG: Balances should be initialized");
+            };
+
+            balances.clone()
+        })
+    }
+
     pub fn assets(&self) -> (ValidatedAsset, ValidatedAsset) {
         let validated_balances = self.get_cached_balances();
         (validated_balances.asset_0, validated_balances.asset_1)
@@ -109,17 +112,28 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         )
     }
 
-    pub fn charge_fee(&mut self, asset: &ValidatedAsset) {
+    pub fn charge_fee(&mut self, asset: ValidatedAsset) {
         self.with_balances_mut(|validated_balances| validated_balances.charge_fee(asset));
     }
 
-    pub fn move_asset(&mut self, asset: &ValidatedAsset, amount: u64, from: Party, to: Party) {
+    pub fn get_asset_for_ledger(&self, canister_id: &String) -> Option<ValidatedAsset> {
+        let (asset_0, asset_1) = self.assets();
+        if asset_0.ledger_canister_id().to_string() == *canister_id {
+            Some(asset_0)
+        } else if asset_1.ledger_canister_id().to_string() == *canister_id {
+            Some(asset_1)
+        } else {
+            None
+        }
+    }
+
+    pub fn move_asset(&mut self, asset: ValidatedAsset, amount: u64, from: Party, to: Party) {
         self.with_balances_mut(|validated_balances| {
             validated_balances.move_asset(asset, from, to, amount)
         });
     }
 
-    pub fn add_manager_balance(&mut self, asset: &ValidatedAsset, amount: u64) {
+    pub fn add_manager_balance(&mut self, asset: ValidatedAsset, amount: u64) {
         self.with_balances_mut(|validated_balances| {
             validated_balances.add_manager_balance(asset, amount)
         });
@@ -127,7 +141,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub fn find_discrepency(
         &mut self,
-        asset: &ValidatedAsset,
+        asset: ValidatedAsset,
         balance_before: u64,
         balance_after: u64,
         transferred_amount: u64,
@@ -150,5 +164,41 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 );
             }
         });
+    }
+
+    fn with_audit_trail_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut StableAuditTrail) -> R,
+    {
+        self.audit_trail
+            .with_borrow_mut(|audit_trail| f(audit_trail))
+    }
+
+    pub fn push_audit_trail_transaction(&self, transaction: StableTransaction) {
+        self.with_audit_trail_mut(|audit_trail| {
+            if let Err(err) = audit_trail.push(&transaction) {
+                log_err(&format!(
+                    "Cannot push transaction to audit trail: {}\ntransaction: {:?}",
+                    err, transaction
+                ));
+            }
+        });
+    }
+
+    pub fn finalize_audit_trail_transaction(&self, context: OperationContext) {
+        let last_entry = self.with_audit_trail_mut(|audit_trail| audit_trail.pop());
+
+        let Some(mut last_entry) = last_entry else {
+            log_err(&format!(
+                "Audit trail is empty despite the operation beign successfully completed. \
+                     Operation context: {:?}",
+                context,
+            ));
+            return;
+        };
+
+        last_entry.operation.step.is_final = true;
+
+        self.push_audit_trail_transaction(last_entry);
     }
 }

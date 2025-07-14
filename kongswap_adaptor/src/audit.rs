@@ -1,9 +1,57 @@
-use sns_treasury_manager::AuditTrail;
+use sns_treasury_manager::{AuditTrail, Operation, Step, TreasuryManagerOperation};
 
 pub const MAX_REPLY_SIZE_BYTES: usize = 1_024;
 
-pub fn serialize_audit_trail(audit_trail: &AuditTrail) -> Result<String, String> {
-    serde_json::to_string(&audit_trail.transactions).map_err(|err| format!("{err:?}"))
+pub fn serialize_audit_trail(
+    audit_trail: &AuditTrail,
+    make_pretty: bool,
+) -> Result<String, String> {
+    let result = if make_pretty {
+        serde_json::to_string_pretty(&audit_trail.transactions)
+    } else {
+        serde_json::to_string(&audit_trail.transactions)
+    };
+    result.map_err(|err| format!("{err:?}"))
+}
+
+#[must_use]
+#[derive(Debug)]
+pub struct OperationContext {
+    operation: Operation,
+
+    /// None indicates that there were no calls yet.
+    index: Option<usize>,
+}
+
+impl OperationContext {
+    pub fn new(operation: Operation) -> Self {
+        Self {
+            operation,
+            index: None,
+        }
+    }
+
+    /// Should be used for operations that are definitely not the final operation
+    /// of the current operation.
+    pub fn next_operation(&mut self) -> TreasuryManagerOperation {
+        let operation = self.operation;
+
+        let index = self
+            .index
+            // If index is available, increment it by 1.
+            .map(|index| index.saturating_add(1))
+            // Otherwise, start from 0.
+            .unwrap_or_default();
+
+        self.index = Some(index);
+
+        let step = Step {
+            index,
+            is_final: false,
+        };
+
+        TreasuryManagerOperation { operation, step }
+    }
 }
 
 /// TAKEN FROM: ic/rs/nervous_system/string/src/lib.rs
