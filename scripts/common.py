@@ -34,7 +34,7 @@ def get_project_paths():
     # In CI, use the current working directory
     if os.environ.get('GITHUB_ACTIONS'):
         PROJECT_DIR = Path.cwd()
-        IC_PATH = PROJECT_DIR.parent()
+        IC_PATH = PROJECT_DIR.parent
         
         # Debug: Print the detected paths
         print(f"[CI] Current working directory: {PROJECT_DIR}")
