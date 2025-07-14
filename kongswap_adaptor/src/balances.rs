@@ -47,7 +47,7 @@ pub(crate) struct ValidatedBalanceBook {
     pub fee_collector: u64,
     pub spendings: u64,
     pub earnings: u64,
-    pub balance_discrepancy: u64,
+    pub suspense: u64,
 }
 
 #[derive(CandidType, Deserialize, Clone)]
@@ -86,7 +86,7 @@ impl ValidatedBalances {
             fee_collector: 0,
             spendings: 0,
             earnings: 0,
-            balance_discrepancy: 0,
+            suspense: 0,
         };
         let asset_1_balance = ValidatedBalanceBook {
             treasury_owner: ValidatedBalance::from((asset_1, owner_account_1.owner)),
@@ -95,7 +95,7 @@ impl ValidatedBalances {
             fee_collector: 0,
             spendings: 0,
             earnings: 0,
-            balance_discrepancy: 0,
+            suspense: 0,
         };
 
         Self {
@@ -270,7 +270,7 @@ impl ValidatedBalances {
 
         if balance_after.abs_diff(balance_before) > asset.ledger_fee_decimals() + transferred_amount
         {
-            validated_balance_book.balance_discrepancy += balance_before
+            validated_balance_book.suspense += balance_before
                 .abs_diff(balance_after + asset.ledger_fee_decimals() + transferred_amount);
         }
     }
@@ -296,7 +296,7 @@ impl ValidatedBalances {
         };
 
         if balance_after.abs_diff(balance_before) < transferred_amount {
-            validated_balance_book.balance_discrepancy +=
+            validated_balance_book.suspense +=
                 balance_after.abs_diff(balance_before + transferred_amount);
         }
     }
