@@ -29,8 +29,17 @@ def run_ic_wasm(args, cwd=None):
 
 def get_project_paths():
     """Get common project paths."""
-    HOME = Path.home()
-    PROJECT_DIR = HOME / "sns-kongswap-adaptor"
+    import os
+    
+    # In CI, use the current working directory
+    if os.environ.get('GITHUB_ACTIONS'):
+        PROJECT_DIR = Path.cwd()
+        HOME = PROJECT_DIR.parent.parent  # /home/runner
+    else:
+        # Local development
+        HOME = Path.home()
+        PROJECT_DIR = HOME / "sns-kongswap-adaptor"
+    
     WASM_DIR = PROJECT_DIR / "target" / "wasm32-unknown-unknown" / "release"
     CANDID = PROJECT_DIR / "kongswap_adaptor" / "kongswap-adaptor.did"
     
@@ -41,6 +50,7 @@ def get_project_paths():
         'candid': CANDID,
         'kongswap_canister': "kongswap-adaptor-canister.wasm",
         'kongswap_canister_gz': "kongswap-adaptor-canister.wasm.gz",
+        'kong_version': "4bf8f99df53dbd34bef0e55ab6364d85bb31c71a",
     }
 
 def validate_project_structure(paths):
