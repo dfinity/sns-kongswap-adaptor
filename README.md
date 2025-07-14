@@ -10,7 +10,6 @@ cargo install ic-wasm
 ### Dependencies
 
 ```
-git clone https://github.com/KongSwap/kong.git
 git clone https://github.com/dfinity/ic.git
 git clone https://github.com/dfinity/sns-kongswap-adaptor.git
 cd sns-kongswap-adaptor
