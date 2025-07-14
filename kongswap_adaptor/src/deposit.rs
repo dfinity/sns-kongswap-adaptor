@@ -201,7 +201,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         {
             if self.is_pool_already_deployed_error(message) {
                 // If the pool already exists, we can proceed with a top-up.
-                self.topup_pool(context, allowance_0, allowance_1).await
+                self.topup_pool(context, allowance_0, allowance_1)
+                    .await
                     .map_err(|err| vec![err])?;
             }
         }
@@ -209,14 +210,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let balances_after = self.get_ledger_balances(context).await?;
 
         self.find_discrepency(
-            &allowance_0.asset,
+            allowance_0.asset,
             balances_before.0,
             balances_after.0,
             allowance_0.amount_decimals,
             true,
         );
         self.find_discrepency(
-            &allowance_1.asset,
+            allowance_1.asset,
             balances_before.1,
             balances_after.1,
             allowance_1.amount_decimals,
@@ -294,8 +295,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, Vec<Error>> {
         {
-            self.add_manager_balance(&allowance_0.asset, allowance_0.amount_decimals);
-            self.add_manager_balance(&allowance_1.asset, allowance_1.amount_decimals);
+            self.add_manager_balance(allowance_0.asset, allowance_0.amount_decimals);
+            self.add_manager_balance(allowance_1.asset, allowance_1.amount_decimals);
         }
 
         let deposit_into_dex_result = self

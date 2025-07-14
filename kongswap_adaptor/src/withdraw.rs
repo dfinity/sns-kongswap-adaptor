@@ -8,8 +8,8 @@ use crate::{
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use icrc_ledger_types::icrc1::account::Account;
-use kongswap_adaptor::agent::AbstractAgent;
-use sns_treasury_manager::{Error, ErrorKind, TreasuryManager, TreasuryManagerOperation};
+use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
+use sns_treasury_manager::{Error, ErrorKind, TreasuryManager};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn withdraw_from_dex(
@@ -30,7 +30,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             remove_lp_token_amount,
         };
 
-        let balances_before = self.get_ledger_balances(operation).await?;
+        let balances_before = self.get_ledger_balances(context).await?;
 
         let RemoveLiquidityReply {
             claim_ids,
@@ -66,25 +66,25 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
 
         // TODO Unwrapping
-        let balances_after = self.get_ledger_balances(operation).await?;
+        let balances_after = self.get_ledger_balances(context).await?;
         let amount_0 = decode_nat_to_u64(amount_0 + lp_fee_0).unwrap();
         let amount_1 = decode_nat_to_u64(amount_1 + lp_fee_1).unwrap();
         self.find_discrepency(
-            &asset_0,
+            asset_0,
             balances_before.0,
             balances_after.0,
             amount_0,
             false,
         );
         self.find_discrepency(
-            &asset_1,
+            asset_1,
             balances_before.1,
             balances_after.1,
             amount_1,
             false,
         );
-        self.move_asset(&asset_0, amount_0, Party::External, Party::TreasuryManager);
-        self.move_asset(&asset_1, amount_1, Party::External, Party::TreasuryManager);
+        self.move_asset(asset_0, amount_0, Party::External, Party::TreasuryManager);
+        self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
 
         Ok(())
     }
@@ -96,7 +96,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let human_readable =
             "Calling KongSwapBackend.claims to check if a retry withdrawal is needed.".to_string();
 
-        let balances_before = self.get_ledger_balances(operation).await?;
+        let balances_before = self.get_ledger_balances(context).await?;
         let claims = self
             .emit_transaction(
                 context.next_operation(),
@@ -129,7 +129,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 )
                 .await;
 
-            let balances_after = self.get_ledger_balances(operation).await?;
+            let balances_after = self.get_ledger_balances(context).await?;
             // If withdrawal has previously failed and before retrying it,
             // the symbol of the asset changes, hence, we need to check the
             // ID of its corresponding ledger canister.
@@ -148,11 +148,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                                     Party::External,
                                     Party::TreasuryManager,
                                 );
-                                balances.find_withdraw_discrepency(
-                                    &asset,
+                                self.find_discrepency(
+                                    asset,
                                     balances_before.0,
                                     balances_after.0,
                                     amount,
+                                    false,
                                 );
                             }
                             Err(err) => {

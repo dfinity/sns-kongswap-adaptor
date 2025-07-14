@@ -152,48 +152,7 @@ impl ValidatedBalances {
 
     // This function updates the distribution of balances for
     // a given asset held by the external protocol.
-    pub(crate) fn set_external_custodian_balance(&mut self, asset: &ValidatedAsset, balance: u64) {
-        let validated_balance_book = if *asset == self.asset_0 {
-            &mut self.asset_0_balance
-        } else if *asset == self.asset_1 {
-            &mut self.asset_1_balance
-        } else {
-            log_err(&format!(
-                "Invalid asset: must be {} or {}.",
-                self.asset_0.symbol(),
-                self.asset_1.symbol()
-            ));
-            return;
-        };
-
-        validated_balance_book.external = balance;
-    }
-
-    pub(crate) fn add_manager_balance(&mut self, asset: &ValidatedAsset, amount: u64) {
-        let validated_balance_book = if *asset == self.asset_0 {
-            &mut self.asset_0_balance
-        } else if *asset == self.asset_1 {
-            &mut self.asset_1_balance
-        } else {
-            log_err(&format!(
-                "Invalid asset: must be {} or {}.",
-                self.asset_0.symbol(),
-                self.asset_1.symbol()
-            ));
-            return;
-        };
-
-        validated_balance_book.treasury_manager.amount_decimals += amount;
-    }
-
-    // TODO[ATG]: Let's discuss this in detail.
-    pub(crate) fn move_asset(
-        &mut self,
-        asset: ValidatedAsset,
-        from: Party,
-        to: Party,
-        amount: u64,
-    ) {
+    pub(crate) fn set_external_custodian_balance(&mut self, asset: ValidatedAsset, balance: u64) {
         let balance_book = if asset == self.asset_0 {
             &mut self.asset_0_balance
         } else if asset == self.asset_1 {
@@ -207,7 +166,24 @@ impl ValidatedBalances {
             return;
         };
 
-        validated_balance_book.treasury_manager.amount_decimals += amount;
+        balance_book.external = balance;
+    }
+
+    pub(crate) fn add_manager_balance(&mut self, asset: ValidatedAsset, amount: u64) {
+        let balance_book = if asset == self.asset_0 {
+            &mut self.asset_0_balance
+        } else if asset == self.asset_1 {
+            &mut self.asset_1_balance
+        } else {
+            log_err(&format!(
+                "Invalid asset: must be {} or {}.",
+                self.asset_0.symbol(),
+                self.asset_1.symbol()
+            ));
+            return;
+        };
+
+        balance_book.treasury_manager.amount_decimals += amount;
     }
 
     // TODO[ATG]: Let's discuss this in detail.
@@ -253,10 +229,10 @@ impl ValidatedBalances {
         balance_book.fee_collector += asset.ledger_fee_decimals();
     }
 
-    pub(crate) fn charge_fee(&mut self, asset: &ValidatedAsset) {
-        let validated_balance_book = if *asset == self.asset_0 {
+    pub(crate) fn charge_fee(&mut self, asset: ValidatedAsset) {
+        let balance_book = if asset == self.asset_0 {
             &mut self.asset_0_balance
-        } else if *asset == self.asset_1 {
+        } else if asset == self.asset_1 {
             &mut self.asset_1_balance
         } else {
             log_err(&format!(
@@ -268,19 +244,19 @@ impl ValidatedBalances {
         };
 
         let fee = asset.ledger_fee_decimals();
-        validated_balance_book.fee_collector += fee;
+        balance_book.fee_collector += fee;
     }
 
     pub(crate) fn find_deposit_discrepency(
         &mut self,
-        asset: &ValidatedAsset,
+        asset: ValidatedAsset,
         balance_before: u64,
         balance_after: u64,
         transferred_amount: u64,
     ) {
-        let validated_balance_book = if *asset == self.asset_0 {
+        let balance_book = if asset == self.asset_0 {
             &mut self.asset_0_balance
-        } else if *asset == self.asset_1 {
+        } else if asset == self.asset_1 {
             &mut self.asset_1_balance
         } else {
             log_err(&format!(
@@ -293,21 +269,21 @@ impl ValidatedBalances {
 
         if balance_after.abs_diff(balance_before) > asset.ledger_fee_decimals() + transferred_amount
         {
-            validated_balance_book.suspense += balance_before
+            balance_book.suspense += balance_before
                 .abs_diff(balance_after + asset.ledger_fee_decimals() + transferred_amount);
         }
     }
 
     pub(crate) fn find_withdraw_discrepency(
         &mut self,
-        asset: &ValidatedAsset,
+        asset: ValidatedAsset,
         balance_before: u64,
         balance_after: u64,
         transferred_amount: u64,
     ) {
-        let validated_balance_book = if *asset == self.asset_0 {
+        let balance_book = if asset == self.asset_0 {
             &mut self.asset_0_balance
-        } else if *asset == self.asset_1 {
+        } else if asset == self.asset_1 {
             &mut self.asset_1_balance
         } else {
             log_err(&format!(
@@ -319,8 +295,7 @@ impl ValidatedBalances {
         };
 
         if balance_after.abs_diff(balance_before) < transferred_amount {
-            validated_balance_book.suspense +=
-                balance_after.abs_diff(balance_before + transferred_amount);
+            balance_book.suspense += balance_after.abs_diff(balance_before + transferred_amount);
         }
     }
 }
@@ -456,7 +431,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub async fn refresh_balances_impl(
         &mut self,
         context: &mut OperationContext,
-    ) -> Result<ValidatedBalances, Error> {
+    ) -> Result<(), Error> {
         if let Err(err) = self.refresh_ledger_metadata(context).await {
             log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
         }
@@ -502,7 +477,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         self.with_balances_mut(|validated_balances| {
             for (asset, &balance) in [asset_0, asset_1]
-                .iter()
+                .into_iter()
                 .zip([balance_0_decimals, balance_1_decimals].iter())
             {
                 validated_balances.set_external_custodian_balance(asset, balance);

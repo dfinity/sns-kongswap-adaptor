@@ -112,7 +112,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         )
     }
 
-    pub fn charge_fee(&mut self, asset: &ValidatedAsset) {
+    pub fn charge_fee(&mut self, asset: ValidatedAsset) {
         self.with_balances_mut(|validated_balances| validated_balances.charge_fee(asset));
     }
 
@@ -133,7 +133,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         });
     }
 
-    pub fn add_manager_balance(&mut self, asset: &ValidatedAsset, amount: u64) {
+    pub fn add_manager_balance(&mut self, asset: ValidatedAsset, amount: u64) {
         self.with_balances_mut(|validated_balances| {
             validated_balances.add_manager_balance(asset, amount)
         });
@@ -141,7 +141,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     pub fn find_discrepency(
         &mut self,
-        asset: &ValidatedAsset,
+        asset: ValidatedAsset,
         balance_before: u64,
         balance_after: u64,
         transferred_amount: u64,
