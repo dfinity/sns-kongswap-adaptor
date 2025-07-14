@@ -29,18 +29,48 @@ def run_ic_wasm(args, cwd=None):
 
 def get_project_paths():
     """Get common project paths."""
-    HOME = Path.home()
-    PROJECT_DIR = HOME / "sns-kongswap-adaptor"
+    import os
+    
+    # In CI, use the current working directory
+    if os.environ.get('GITHUB_ACTIONS'):
+        PROJECT_DIR = Path.cwd()
+        IC_DIR = PROJECT_DIR.parent / "ic"
+        
+        # Debug: Print the detected paths
+        print(f"[CI] Current working directory: {PROJECT_DIR}")
+        print(f"[CI] Project contents: {list(PROJECT_DIR.iterdir())}")
+        print(f"[CI] IC directory: {IC_DIR}")
+        print(f"[CI] IC contents: {list(IC_DIR.iterdir())}")
+        
+        # Verify workspace structure
+        cargo_toml = PROJECT_DIR / "Cargo.toml"
+        if cargo_toml.exists():
+            print(f"[CI] Found Cargo.toml at: {cargo_toml}")
+        else:
+            print(f"[CI] ERROR: No Cargo.toml found at: {cargo_toml}")
+            
+        kongswap_dir = PROJECT_DIR / "kongswap_adaptor"
+        if kongswap_dir.exists():
+            print(f"[CI] Found kongswap_adaptor directory at: {kongswap_dir}")
+        else:
+            print(f"[CI] ERROR: No kongswap_adaptor directory found at: {kongswap_dir}")
+            
+    else:
+        # Local development
+        PROJECT_DIR = Path.home() / "sns-kongswap-adaptor"
+        IC_DIR = Path.home() / "ic"
+    
     WASM_DIR = PROJECT_DIR / "target" / "wasm32-unknown-unknown" / "release"
     CANDID = PROJECT_DIR / "kongswap_adaptor" / "kongswap-adaptor.did"
     
     return {
-        'home': HOME,
+        'ic_dir': IC_DIR,
         'project_dir': PROJECT_DIR,
         'wasm_dir': WASM_DIR,
         'candid': CANDID,
         'kongswap_canister': "kongswap-adaptor-canister.wasm",
         'kongswap_canister_gz': "kongswap-adaptor-canister.wasm.gz",
+        'kong_version': "4bf8f99df53dbd34bef0e55ab6364d85bb31c71a",
     }
 
 def validate_project_structure(paths):
@@ -79,7 +109,7 @@ def download_mainnet_canisters(paths):
     import urllib.request
     
     # Validate IC directory exists
-    ic_dir = paths['home'] / "ic"
+    ic_dir = paths['ic_dir']
     
     if not ic_dir.exists():
         print(f"Error: IC directory does not exist: {ic_dir}")
