@@ -24,7 +24,7 @@ ic-cdk-timers.workspace = true
 ic-stable-structures = { workspace = true }
 lazy_static = "1.5.0"
 serde = { workspace = true }
-sns-treasury-manager = { path = { env = "IC_PATH", default = "../ic" }, default-features = false }
+sns-treasury-manager = { path = "../../ic/rs/sns/treasury_manager" }
 maplit = "1.0.2"
 itertools = "0.14.0"
 thiserror = "2.0.12"
