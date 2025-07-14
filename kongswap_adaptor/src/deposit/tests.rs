@@ -1,11 +1,20 @@
-use std::{cell::RefCell, error::Error, fmt::Display};
 use candid::Principal;
-use ic_stable_structures::{memory_manager::{MemoryId, MemoryManager}, VectorMemory};
-use sns_treasury_manager::{Allowance, Asset, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit};
+use ic_stable_structures::{
+    memory_manager::{MemoryId, MemoryManager},
+    VectorMemory,
+};
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use pretty_assertions::assert_eq;
+use sns_treasury_manager::{
+    Allowance, Asset, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit,
+};
+use std::{cell::RefCell, error::Error, fmt::Display};
 
-use crate::{state::storage::ConfigState, validation::{ValidatedAsset, ValidatedTreasuryManagerInit}, StableAuditTrail, StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID};
+use crate::{
+    state::storage::ConfigState,
+    validation::{ValidatedAsset, ValidatedTreasuryManagerInit},
+    StableAuditTrail, StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
+};
 
 use super::*;
 
@@ -53,7 +62,7 @@ impl MockAgent {
             raw_reply: None,
         }
     }
-    
+
     pub fn with_error(mut self, error: &str) -> Self {
         self.should_fail = true;
         self.error_message = Some(error.into());
@@ -75,13 +84,16 @@ impl AbstractAgent for MockAgent {
         _request: R,
     ) -> Result<R::Response, Self::Error> {
         if self.should_fail {
-            return Err(self.error_message.clone().unwrap_or_else(|| "Mock error".into()));
+            return Err(self
+                .error_message
+                .clone()
+                .unwrap_or_else(|| "Mock error".into()));
         }
 
         if let Some(raw_reply) = &self.raw_reply {
             return Ok(candid::decode_one::<R::Response>(raw_reply).map_err(|e| e.to_string())?);
         }
-        
+
         // Return mock responses based on request type
         // You'll need to implement specific mock responses for each request type
         todo!("The test should specify the expected error or reply for each MockAgent call.")
@@ -96,24 +108,24 @@ async fn test_deposit_success() {
         symbol: "DAO".to_string(),
         ledger_fee_decimals: Nat::from(10_000u64),
     };
-    
+
     let asset_1 = Asset::Token {
         ledger_canister_id: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
         symbol: "ICP".to_string(),
         ledger_fee_decimals: Nat::from(10_000u64),
     };
-    
+
     let owner_account = sns_treasury_manager::Account {
         owner: Principal::from_text("2vxsx-fae").unwrap(),
         subaccount: None,
     };
-    
+
     // Set up mock agent with expected responses
-    let mock_agent = MockAgent::new()
-        .with_raw_reply(candid::encode_one(Nat::from(1000 * E8)).unwrap()); // Mock allowance response
-    
+    let mock_agent =
+        MockAgent::new().with_raw_reply(candid::encode_one(Nat::from(1000 * E8)).unwrap()); // Mock allowance response
+
     // Use VectorMemory for testing - much cleaner
-    
+
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
             RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -139,9 +151,10 @@ async fn test_deposit_success() {
                 )
             );
     }
-    
+
     let canister_id = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let mut kong_adaptor = KongSwapAdaptor::new(
+        || 0, // Mock time function
         mock_agent,
         canister_id,
         &BALANCES,
@@ -161,13 +174,15 @@ async fn test_deposit_success() {
         },
     ];
 
-    let init = TreasuryManagerInit { allowances: allowances.clone() };
+    let init = TreasuryManagerInit {
+        allowances: allowances.clone(),
+    };
 
     let ValidatedTreasuryManagerInit {
         allowance_0,
         allowance_1,
     } = init.try_into().unwrap();
-    
+
     // Initialize and test
     kong_adaptor.initialize(
         allowance_0.asset,
@@ -175,13 +190,10 @@ async fn test_deposit_success() {
         allowance_0.owner_account,
         allowance_1.owner_account,
     );
-    
+
     // This should now work without panicking
     let request = DepositRequest { allowances };
-    let result = kong_adaptor.deposit(request).await.unwrap();
+    let result = kong_adaptor.deposit(request).await;
 
-    assert_eq!(
-        result,
-        Balances::default(),
-    );
+    assert_eq!(result, Ok(Balances::default()),);
 }

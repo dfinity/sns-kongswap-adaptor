@@ -116,7 +116,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 from_subaccount: None,
                 to: withdraw_account,
                 fee: Some(Nat::from(asset.ledger_fee_decimals())),
-                created_at_time: Some(ic_cdk::api::time()),
+                created_at_time: Some(self.time_ns()),
                 memo: Some(Memo::from(Vec::<u8>::from(operation))),
                 amount: Nat::from(amount_decimals),
             };

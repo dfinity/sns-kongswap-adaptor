@@ -62,47 +62,62 @@ pub(crate) struct ValidatedBalances {
     pub asset_1_balance: ValidatedBalanceBook,
 }
 
-impl From<(ValidatedAsset, Principal)> for ValidatedBalance {
-    fn from(value: (ValidatedAsset, Principal)) -> Self {
-        Self {
-            amount_decimals: 0,
-            account: Account {
-                owner: value.1,
-                subaccount: None,
-            },
-            name: value.0.symbol(),
-        }
-    }
-}
-
 impl ValidatedBalances {
     pub(crate) fn new(
+        timestamp_ns: u64,
         asset_0: ValidatedAsset,
         asset_1: ValidatedAsset,
+        owner_name: String,
         owner_account_0: Account,
         owner_account_1: Account,
+        manager_name: String,
+        manager_account_0: Account,
+        manager_account_1: Account,
     ) -> Self {
+        let amount_decimals = 0;
+        let external = 0;
+        let fee_collector = 0;
+        let spendings = 0;
+        let earnings = 0;
+        let suspense = 0;
+
         let asset_0_balance = ValidatedBalanceBook {
-            treasury_owner: ValidatedBalance::from((asset_0, owner_account_0.owner)),
-            treasury_manager: ValidatedBalance::from((asset_0, ic_cdk::id())),
-            external: 0,
-            fee_collector: 0,
-            spendings: 0,
-            earnings: 0,
-            suspense: 0,
+            treasury_owner: ValidatedBalance {
+                amount_decimals,
+                account: owner_account_0,
+                name: owner_name.clone(),
+            },
+            treasury_manager: ValidatedBalance {
+                amount_decimals,
+                account: manager_account_0,
+                name: manager_name.clone(),
+            },
+            external,
+            fee_collector,
+            spendings,
+            earnings,
+            suspense,
         };
         let asset_1_balance = ValidatedBalanceBook {
-            treasury_owner: ValidatedBalance::from((asset_1, owner_account_1.owner)),
-            treasury_manager: ValidatedBalance::from((asset_1, ic_cdk::id())),
-            external: 0,
-            fee_collector: 0,
-            spendings: 0,
-            earnings: 0,
-            suspense: 0,
+            treasury_owner: ValidatedBalance {
+                amount_decimals,
+                account: owner_account_1,
+                name: owner_name,
+            },
+            treasury_manager: ValidatedBalance {
+                amount_decimals,
+                account: manager_account_1,
+                name: manager_name,
+            },
+            external,
+            fee_collector,
+            spendings,
+            earnings,
+            suspense,
         };
 
         Self {
-            timestamp_ns: ic_cdk::api::time(),
+            timestamp_ns,
             asset_0,
             asset_1,
             asset_0_balance,

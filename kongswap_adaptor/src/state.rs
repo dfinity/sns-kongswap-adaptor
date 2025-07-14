@@ -8,30 +8,38 @@ use crate::{
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
+use sns_treasury_manager::{AuditTrail, Transaction};
 use std::{cell::RefCell, thread::LocalKey};
 
 pub(crate) mod storage;
 
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
+    time_ns: fn() -> u64,
     pub agent: A,
     pub id: Principal,
-    pub balances: &'static LocalKey<RefCell<StableBalances>>,
-    pub audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
+    balances: &'static LocalKey<RefCell<StableBalances>>,
+    audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
 }
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn new(
+        time_ns: fn() -> u64,
         agent: A,
         id: Principal,
         balances: &'static LocalKey<RefCell<StableBalances>>,
         audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
     ) -> Self {
         KongSwapAdaptor {
+            time_ns,
             agent,
             id,
             balances,
             audit_trail,
         }
+    }
+
+    pub fn time_ns(&self) -> u64 {
+        (self.time_ns)()
     }
 
     pub fn initialize(
@@ -49,8 +57,26 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 ));
             }
 
-            let validated_balances =
-                ValidatedBalances::new(asset_0, asset_1, owner_account_0, owner_account_1);
+            // On each ledger, use the main account and no subaccount for managing the assets.
+            let manager_account = Account {
+                owner: self.id,
+                subaccount: None,
+            };
+
+            let timestamp_ns = self.time_ns();
+
+            let validated_balances = ValidatedBalances::new(
+                timestamp_ns,
+                asset_0,
+                asset_1,
+                // TODO: Ideally, we would have the name of the owner / SNS.
+                "SNS DAO".to_string(),
+                owner_account_0,
+                owner_account_1,
+                format!("KongSwapAdaptor({})", self.id),
+                manager_account,
+                manager_account,
+            );
 
             if let Err(err) = cell.set(ConfigState::Initialized(validated_balances)) {
                 log_err(&format!("Failed to initialize balances: {:?}", err));
@@ -200,5 +226,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         last_entry.operation.step.is_final = true;
 
         self.push_audit_trail_transaction(last_entry);
+    }
+
+    pub fn get_audit_trail(&self) -> AuditTrail {
+        let transactions = self
+            .audit_trail
+            .with_borrow(|audit_trail| audit_trail.iter().map(Transaction::from).collect());
+
+        AuditTrail { transactions }
     }
 }

@@ -42,7 +42,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         };
 
         let transaction = StableTransaction {
-            timestamp_ns: ic_cdk::api::time(),
+            timestamp_ns: self.time_ns(),
             canister_id,
             result,
             human_readable,
