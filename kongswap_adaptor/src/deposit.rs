@@ -22,7 +22,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<ValidatedBalances, Error> {
+    ) -> Result<(), Vec<Error>> {
         let operation = TreasuryManagerOperation::new(sns_treasury_manager::Operation::Deposit);
 
         // Step 0. Enforce that each KongSwapAdaptor instance manages a single token pair.
@@ -35,7 +35,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             if new_ledger_0 != old_asset_0.ledger_canister_id()
                 || new_ledger_1 != old_asset_1.ledger_canister_id()
             {
-                return Err(Error {
+                return Err(vec![Error {
                 code: u64::from(TransactionErrorCodes::PreConditionCode),
                     message: format!(
                     "This KongSwapAdaptor only supports {}:{} as token_{{0,1}} (got ledger_0 {}, ledger_1 {}).",
@@ -45,7 +45,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     new_ledger_1,
                 ),
                 kind: ErrorKind::Precondition {  }
-                }
+                }]
             );
             }
         }
@@ -88,7 +88,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             self.charge_fee(asset);
 
             self.emit_transaction(canister_id, request, operation, human_readable)
-                .await?;
+                .await
+                .map_err(|err| vec![err])?;
         }
 
         let ledger_0 = allowance_0.asset.ledger_canister_id();
@@ -113,17 +114,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // - KongSwap starts indexing tokens from 1.
         // - The ICP token is assumed to have index 2.
         // https://github.com/KongSwap/kong/blob/fe-predictions-update/src/kong_lib/src/ic/icp.rs#L1
-        self.maybe_add_token(ledger_0, operation).await?;
-        self.maybe_add_token(ledger_1, operation).await?;
+        self.maybe_add_token(ledger_0, operation)
+            .await
+            .map_err(|err| vec![err])?;
+        self.maybe_add_token(ledger_1, operation)
+            .await
+            .map_err(|err| vec![err])?;
 
         // Step 3. Fetch the latest ledger metadata, including symbols and ledger fees.
-        self.refresh_ledger_metadata(operation).await?;
+        self.refresh_ledger_metadata(operation)
+            .await
+            .map_err(|err| vec![err])?;
 
         // Step 4. Ensure the pool exists.
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
 
-        let original_amount_1 = amount_1.clone();
+        let balances_before = self.get_ledger_balances(operation).await?;
 
         let result = self
             .emit_transaction(
@@ -173,14 +180,31 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     Party::TreasuryManager,
                     Party::External,
                 );
-                return Ok(self.get_cached_balances());
+
+                let balances_after = self.get_ledger_balances(operation).await?;
+                self.find_discrepency(
+                    &allowance_0.asset,
+                    balances_before.0,
+                    balances_after.0,
+                    amount_0,
+                    true,
+                );
+                self.find_discrepency(
+                    &allowance_1.asset,
+                    balances_before.1,
+                    balances_after.1,
+                    amount_1,
+                    true,
+                );
+
+                return Ok(());
             }
 
             // An already-existing pool does not preclude a top-up  =>  Keep going.
             Err(Error { message, .. }) if tolerated_errors.contains(&message) => (),
 
             Err(err) => {
-                return Err(err);
+                return Err(vec![err]);
             }
         }
 
@@ -205,7 +229,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 operation,
                 human_readable,
             )
-            .await?
+            .await
+            .map_err(|err| vec![err])?
         };
 
         let reply = {
@@ -232,7 +257,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 operation,
                 human_readable,
             )
-            .await?
+            .await
+            .map_err(|err| vec![err])?
         };
 
         // Topping-up the DEX with asset_0 and asset_1 was successful.
@@ -253,21 +279,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             Party::External,
         );
 
-        // @todo As we discussed, the direction of this comparison is reversed.
-        if original_amount_1 < amount_1 {
-            return Err(Error {
-                code: u64::from(TransactionErrorCodes::BackendCode),
-                message: format!(
-                    "Got top-up amount_1 = {} (must be at least {})",
-                    original_amount_1, amount_1
-                ),
-                kind: ErrorKind::Backend {},
-            });
-        }
+        let balances_after = self.get_ledger_balances(operation).await?;
+        self.find_discrepency(
+            &allowance_0.asset,
+            balances_before.0,
+            balances_after.0,
+            amount_0,
+            true,
+        );
+        self.find_discrepency(
+            &allowance_1.asset,
+            balances_before.1,
+            balances_after.1,
+            amount_1,
+            true,
+        );
 
-        self.refresh_balances().await;
-
-        Ok(self.get_cached_balances())
+        Ok(())
     }
 
     // TODO refersh balances
@@ -276,6 +304,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, Vec<Error>> {
+        {
+            self.add_manager_balance(&allowance_0.asset, allowance_0.amount_decimals);
+            self.add_manager_balance(&allowance_1.asset, allowance_1.amount_decimals);
+        }
         let deposit_into_dex_result = self.deposit_into_dex(allowance_0, allowance_1).await;
 
         let returned_amounts_result = self
@@ -286,12 +318,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             )
             .await;
 
+        self.refresh_balances().await;
+
         match (deposit_into_dex_result, returned_amounts_result) {
-            (Ok(_), Ok(returned_amounts)) => Ok(returned_amounts),
+            (Ok(_), Ok(_)) => Ok(self.get_cached_balances()),
             (Ok(_), Err(errs)) => Err(errs),
-            (Err(err), Ok(_)) => Err(vec![err]),
-            (Err(err_1), Err(errs_2)) => {
-                let mut errs = vec![err_1];
+            (Err(errs), Ok(_)) => Err(errs),
+            (Err(errs_1), Err(errs_2)) => {
+                let mut errs = errs_1;
                 errs.extend(errs_2.into_iter());
                 Err(errs)
             }

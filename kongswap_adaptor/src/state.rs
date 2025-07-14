@@ -118,4 +118,37 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             validated_balances.move_asset(asset, from, to, amount)
         });
     }
+
+    pub fn add_manager_balance(&mut self, asset: &ValidatedAsset, amount: u64) {
+        self.with_balances_mut(|validated_balances| {
+            validated_balances.add_manager_balance(asset, amount)
+        });
+    }
+
+    pub fn find_discrepency(
+        &mut self,
+        asset: &ValidatedAsset,
+        balance_before: u64,
+        balance_after: u64,
+        transferred_amount: u64,
+        is_deposit: bool,
+    ) {
+        self.with_balances_mut(|validated_balances| {
+            if is_deposit {
+                validated_balances.find_deposit_discrepency(
+                    asset,
+                    balance_before,
+                    balance_after,
+                    transferred_amount,
+                );
+            } else {
+                validated_balances.find_withdraw_discrepency(
+                    asset,
+                    balance_before,
+                    balance_after,
+                    transferred_amount,
+                );
+            }
+        });
+    }
 }
