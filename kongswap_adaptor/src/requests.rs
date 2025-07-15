@@ -1,4 +1,5 @@
 use crate::agent::Request;
+use candid::CandidType;
 use sns_treasury_manager::{
     AuditTrail, AuditTrailRequest, BalancesRequest, DepositRequest, TreasuryManagerResult,
     WithdrawRequest,
@@ -92,6 +93,7 @@ impl Request for AuditTrailRequest {
     }
 }
 
+#[derive(CandidType)]
 pub struct CommitStateRequest {}
 
 impl Request for CommitStateRequest {

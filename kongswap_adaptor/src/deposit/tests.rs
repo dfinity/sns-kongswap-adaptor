@@ -1,14 +1,15 @@
-use candid::Principal;
+use candid::{CandidType, Principal};
 use ic_stable_structures::{
     memory_manager::{MemoryId, MemoryManager},
     VectorMemory,
 };
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
+use kongswap_adaptor::agent::Request;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
     Allowance, Asset, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit,
 };
-use std::{cell::RefCell, error::Error, fmt::Display};
+use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
 use crate::{
     state::storage::ConfigState,
@@ -47,31 +48,71 @@ impl Display for MockError {
 
 impl Error for MockError {}
 
+struct Call {
+    raw_request: Vec<u8>,
+    raw_reply: Option<Vec<u8>>,
+    failure_message: Option<String>,
+}
+
+impl Call {
+    fn new<Req>(
+        request: Req,
+        reply: Option<Req::Response>,
+        failure_message: Option<String>,
+    ) -> Result<Self, ()>
+    where
+        Req: Request + CandidType,
+    {
+        // If we define a failure message, we cannot have a reply
+        if reply.is_some() && failure_message.is_some() {
+            return Err(());
+        }
+
+        let raw_request = candid::encode_one(request).map_err(|_| {})?;
+        let raw_reply = match reply {
+            Some(reply) => {
+                let encoded_reply = candid::encode_one(reply);
+                match encoded_reply {
+                    Ok(reply) => Some(reply),
+                    Err(_) => {
+                        return Err(());
+                    }
+                }
+            }
+            None => None,
+        };
+        Ok(Self {
+            raw_request,
+            raw_reply,
+            failure_message,
+        })
+    }
+}
+
 struct MockAgent {
     // Add fields to control mock behavior
-    should_fail: bool,
-    error_message: Option<MockError>,
-    raw_reply: Option<Vec<u8>>,
+    expected_calls: VecDeque<Call>,
 }
 
 impl MockAgent {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
-            should_fail: false,
-            error_message: None,
-            raw_reply: None,
+            expected_calls: VecDeque::default(),
         }
     }
 
-    pub fn with_error(mut self, error: &str) -> Self {
-        self.should_fail = true;
-        self.error_message = Some(error.into());
-        self
-    }
-
-    pub fn with_raw_reply(mut self, blob: Vec<u8>) -> Self {
-        self.raw_reply = Some(blob);
-        self
+    fn add_call<Req>(
+        &mut self,
+        request: Req,
+        reply: Option<Req::Response>,
+        failure_message: Option<String>,
+    ) -> Result<(), ()>
+    where
+        Req: Request + CandidType,
+    {
+        let call = Call::new(request, reply, failure_message)?;
+        self.expected_calls.push_back(call);
+        Ok(())
     }
 }
 
@@ -81,22 +122,40 @@ impl AbstractAgent for MockAgent {
     async fn call<R: kongswap_adaptor::agent::Request>(
         &self,
         _canister_id: impl Into<Principal> + Send,
-        _request: R,
-    ) -> Result<R::Response, Self::Error> {
-        if self.should_fail {
-            return Err(self
-                .error_message
-                .clone()
-                .unwrap_or_else(|| "Mock error".into()));
+        request: R,
+    ) -> Result<R::Response, Self::Error>
+    where
+        R: CandidType,
+    {
+        if self.expected_calls.is_empty() {
+            return Err(MockError {
+                message: "Didn't expect any calls".to_string(),
+            });
+        }
+        // Unwrapping is safe, we have ensured previously
+        // that there exists at least one call.
+        let expected_call = self.expected_calls.pop_front().unwrap();
+        let Ok(raw_request) = candid::encode_one(request) else {
+            return Err(MockError {
+                message: "Cannot encode the request".to_string(),
+            });
+        };
+
+        if raw_request != expected_call.raw_request {
+            return Err(MockError {
+                message: "Request doesn't match the expected one".to_string(),
+            });
         }
 
-        if let Some(raw_reply) = &self.raw_reply {
+        if let Some(failure_message) = expected_call.failure_message {
+            return Err(MockError {
+                message: expected_call.failure_message.unwrap(),
+            });
+        }
+
+        if let Some(raw_reply) = expected_call.raw_reply {
             return Ok(candid::decode_one::<R::Response>(raw_reply).map_err(|e| e.to_string())?);
         }
-
-        // Return mock responses based on request type
-        // You'll need to implement specific mock responses for each request type
-        todo!("The test should specify the expected error or reply for each MockAgent call.")
     }
 }
 
