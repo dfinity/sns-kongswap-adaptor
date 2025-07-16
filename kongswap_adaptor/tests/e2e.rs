@@ -324,7 +324,7 @@ async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
 }
 
 async fn mint_tokens<Agent>(
-    agent: &Agent,
+    agent: &mut Agent,
     icrc1_ledger_canister_id: Principal,
     beneficiary_account: Account,
     amount_e8s: u64,

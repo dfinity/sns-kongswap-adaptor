@@ -48,39 +48,34 @@ impl Display for MockError {
 
 impl Error for MockError {}
 
-struct Call {
+struct CallSpec {
     raw_request: Vec<u8>,
     raw_reply: Option<Vec<u8>>,
     failure_message: Option<String>,
 }
 
-impl Call {
+impl CallSpec {
     fn new<Req>(
         request: Req,
-        reply: Option<Req::Response>,
-        failure_message: Option<String>,
+        result: Result<Option<Req::Response>, Option<String>>,
     ) -> Result<Self, ()>
     where
         Req: Request + CandidType,
     {
-        // If we define a failure message, we cannot have a reply
-        if reply.is_some() && failure_message.is_some() {
-            return Err(());
-        }
+        let raw_request = candid::encode_one(request).expect("Request is not encodable");
 
-        let raw_request = candid::encode_one(request).map_err(|_| {})?;
-        let raw_reply = match reply {
-            Some(reply) => {
-                let encoded_reply = candid::encode_one(reply);
-                match encoded_reply {
-                    Ok(reply) => Some(reply),
-                    Err(_) => {
-                        return Err(());
-                    }
+        let (raw_reply, failure_message) = match result {
+            Ok(response) => match response {
+                Some(reply) => {
+                    let encoded_reply =
+                        candid::encode_one(reply).expect("Response is not encodable");
+                    (Some(encoded_reply), None)
                 }
-            }
-            None => None,
+                None => (None, None),
+            },
+            Err(failure_message) => (None, failure_message),
         };
+
         Ok(Self {
             raw_request,
             raw_reply,
@@ -91,7 +86,7 @@ impl Call {
 
 struct MockAgent {
     // Add fields to control mock behavior
-    expected_calls: VecDeque<Call>,
+    expected_calls: VecDeque<CallSpec>,
 }
 
 impl MockAgent {
@@ -102,17 +97,21 @@ impl MockAgent {
     }
 
     fn add_call<Req>(
-        &mut self,
+        mut self,
         request: Req,
-        reply: Option<Req::Response>,
-        failure_message: Option<String>,
-    ) -> Result<(), ()>
+        result: Result<Option<Req::Response>, Option<String>>,
+    ) -> Self
     where
         Req: Request + CandidType,
     {
-        let call = Call::new(request, reply, failure_message)?;
+        let call =
+            CallSpec::new(request, result).expect("Creating a new call specification failed");
         self.expected_calls.push_back(call);
-        Ok(())
+        self
+    }
+
+    fn finished_calls(&self) -> bool {
+        self.expected_calls.is_empty()
     }
 }
 
@@ -120,21 +119,18 @@ impl AbstractAgent for MockAgent {
     type Error = MockError;
 
     async fn call<R: kongswap_adaptor::agent::Request>(
-        &self,
+        &mut self,
         _canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error>
     where
         R: CandidType,
     {
-        if self.expected_calls.is_empty() {
-            return Err(MockError {
-                message: "Didn't expect any calls".to_string(),
-            });
-        }
-        // Unwrapping is safe, we have ensured previously
-        // that there exists at least one call.
-        let expected_call = self.expected_calls.pop_front().unwrap();
+        let expected_call = self
+            .expected_calls
+            .pop_front()
+            .expect("Consumed all expected requests");
+
         let Ok(raw_request) = candid::encode_one(request) else {
             return Err(MockError {
                 message: "Cannot encode the request".to_string(),
@@ -149,13 +145,19 @@ impl AbstractAgent for MockAgent {
 
         if let Some(failure_message) = expected_call.failure_message {
             return Err(MockError {
-                message: expected_call.failure_message.unwrap(),
+                message: failure_message,
             });
         }
 
         if let Some(raw_reply) = expected_call.raw_reply {
-            return Ok(candid::decode_one::<R::Response>(raw_reply).map_err(|e| e.to_string())?);
+            let reply = candid::decode_one::<R::Response>(&raw_reply)
+                .expect("Unable to decode the response");
+            return Ok(reply);
         }
+
+        return Err(MockError {
+            message: "No replies found for the request".to_string(),
+        });
     }
 }
 
@@ -178,12 +180,6 @@ async fn test_deposit_success() {
         owner: Principal::from_text("2vxsx-fae").unwrap(),
         subaccount: None,
     };
-
-    // Set up mock agent with expected responses
-    let mock_agent =
-        MockAgent::new().with_raw_reply(candid::encode_one(Nat::from(1000 * E8)).unwrap()); // Mock allowance response
-
-    // Use VectorMemory for testing - much cleaner
 
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
@@ -211,15 +207,6 @@ async fn test_deposit_success() {
             );
     }
 
-    let canister_id = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
-    let mut kong_adaptor = KongSwapAdaptor::new(
-        || 0, // Mock time function
-        mock_agent,
-        canister_id,
-        &BALANCES,
-        &AUDIT_TRAIL,
-    );
-
     let allowances = vec![
         Allowance {
             asset: asset_0,
@@ -233,9 +220,23 @@ async fn test_deposit_success() {
         },
     ];
 
-    let init = TreasuryManagerInit {
+    let request = DepositRequest {
         allowances: allowances.clone(),
     };
+    let result = Ok(Some(Ok(Balances::default())));
+    // Set up mock agent with expected responses
+    let mock_agent = MockAgent::new().add_call(request.clone(), result);
+
+    let canister_id = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
+    let mut kong_adaptor = KongSwapAdaptor::new(
+        || 0, // Mock time function
+        mock_agent,
+        canister_id,
+        &BALANCES,
+        &AUDIT_TRAIL,
+    );
+
+    let init = TreasuryManagerInit { allowances };
 
     let ValidatedTreasuryManagerInit {
         allowance_0,
@@ -251,7 +252,6 @@ async fn test_deposit_success() {
     );
 
     // This should now work without panicking
-    let request = DepositRequest { allowances };
     let result = kong_adaptor.deposit(request).await;
 
     assert_eq!(result, Ok(Balances::default()),);

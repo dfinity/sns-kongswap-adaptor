@@ -28,7 +28,7 @@ pub trait AbstractAgent: Send + Sync {
     type Error: Display + Send + Error + 'static;
 
     fn call<R: Request + CandidType>(
-        &self,
+        &mut self,
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> impl Future<Output = Result<R::Response, Self::Error>> + Send;
