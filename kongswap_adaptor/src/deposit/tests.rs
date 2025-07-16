@@ -1,23 +1,24 @@
-use candid::{CandidType, Principal};
-use ic_stable_structures::{
-    memory_manager::{MemoryId, MemoryManager},
-    VectorMemory,
-};
+use candid::Principal;
+use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
-use kongswap_adaptor::agent::Request;
+use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
+use kongswap_adaptor::agent::icrc_requests::Icrc1MetadataRequest;
+use kongswap_adaptor::{agent::Request, requests::CommitStateRequest};
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
     Allowance, Asset, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit,
 };
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
-use crate::{
-    state::storage::ConfigState,
-    validation::{ValidatedAsset, ValidatedTreasuryManagerInit},
-    StableAuditTrail, StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
-};
-
 use super::*;
+use crate::kong_types::{
+    AddPoolReply, AddTokenArgs, AddTokenReply, ICReply, UpdateTokenArgs, UpdateTokenReply,
+};
+use crate::{
+    state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
+    StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
+};
+use std::fmt::Debug;
 
 const E8: u64 = 10_000_000;
 
@@ -48,38 +49,25 @@ impl Display for MockError {
 
 impl Error for MockError {}
 
+// TODO use Result to store reply and failure
 struct CallSpec {
     raw_request: Vec<u8>,
-    raw_reply: Option<Vec<u8>>,
-    failure_message: Option<String>,
+    raw_response: Vec<u8>,
+    canister_id: Principal,
 }
 
 impl CallSpec {
-    fn new<Req>(
-        request: Req,
-        result: Result<Option<Req::Response>, Option<String>>,
-    ) -> Result<Self, ()>
+    fn new<Req>(canister_id: Principal, request: Req, response: Req::Response) -> Result<Self, ()>
     where
-        Req: Request + CandidType,
+        Req: Request,
     {
-        let raw_request = candid::encode_one(request).expect("Request is not encodable");
-
-        let (raw_reply, failure_message) = match result {
-            Ok(response) => match response {
-                Some(reply) => {
-                    let encoded_reply =
-                        candid::encode_one(reply).expect("Response is not encodable");
-                    (Some(encoded_reply), None)
-                }
-                None => (None, None),
-            },
-            Err(failure_message) => (None, failure_message),
-        };
+        let raw_request = request.payload().expect("Request is not encodable");
+        let raw_response = candid::encode_one(response).expect("Response is not encodable");
 
         Ok(Self {
             raw_request,
-            raw_reply,
-            failure_message,
+            raw_response,
+            canister_id,
         })
     }
 }
@@ -98,14 +86,22 @@ impl MockAgent {
 
     fn add_call<Req>(
         mut self,
+        canister_id: Principal,
         request: Req,
-        result: Result<Option<Req::Response>, Option<String>>,
+        response: Req::Response,
     ) -> Self
     where
-        Req: Request + CandidType,
+        Req: Request,
     {
-        let call =
-            CallSpec::new(request, result).expect("Creating a new call specification failed");
+        let call = CallSpec::new(canister_id, request, response)
+            .expect("Creating a new call specification failed");
+        self.expected_calls.push_back(call);
+        self
+    }
+
+    fn commit_state(mut self, canister_id: Principal) -> Self {
+        let call = CallSpec::new(canister_id, CommitStateRequest {}, ())
+            .expect("CommittState call creation failed");
         self.expected_calls.push_back(call);
         self
     }
@@ -117,63 +113,180 @@ impl MockAgent {
 
 impl AbstractAgent for MockAgent {
     type Error = MockError;
-
-    async fn call<R: kongswap_adaptor::agent::Request>(
+    // Infallable !
+    async fn call<R: kongswap_adaptor::agent::Request + Debug>(
         &mut self,
-        _canister_id: impl Into<Principal> + Send,
+        canister_id: impl Into<Principal> + Send,
         request: R,
-    ) -> Result<R::Response, Self::Error>
-    where
-        R: CandidType,
-    {
+    ) -> Result<R::Response, Self::Error> {
+        println!("started call...");
+        let Ok(raw_request) = request.payload() else {
+            panic!("Cannot encode the request");
+        };
+
         let expected_call = self
             .expected_calls
             .pop_front()
             .expect("Consumed all expected requests");
 
-        let Ok(raw_request) = candid::encode_one(request) else {
-            return Err(MockError {
-                message: "Cannot encode the request".to_string(),
-            });
-        };
-
         if raw_request != expected_call.raw_request {
-            return Err(MockError {
-                message: "Request doesn't match the expected one".to_string(),
-            });
+            println!("request: {:#?}", request);
+            panic!("Request doesn't match");
+        }
+        let canister_id = canister_id.into();
+
+        if canister_id != expected_call.canister_id {
+            println!("request canister id: {}", canister_id);
+            panic!("Canister IDs doesn't match");
         }
 
-        if let Some(failure_message) = expected_call.failure_message {
-            return Err(MockError {
-                message: failure_message,
-            });
-        }
+        let reply = candid::decode_one::<R::Response>(&expected_call.raw_response)
+            .expect("Unable to decode the response");
 
-        if let Some(raw_reply) = expected_call.raw_reply {
-            let reply = candid::decode_one::<R::Response>(&raw_reply)
-                .expect("Unable to decode the response");
-            return Ok(reply);
-        }
+        println!("successfully called canister ID: {}", canister_id);
+        return Ok(reply);
+    }
+}
 
-        return Err(MockError {
-            message: "No replies found for the request".to_string(),
-        });
+fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
+    ApproveArgs {
+        from_subaccount: None,
+        spender: Account {
+            owner: *KONG_BACKEND_CANISTER_ID,
+            subaccount: None,
+        },
+        // All approved tokens should be fully used up before the next deposit.
+        amount: Nat::from(amount - fee),
+        expected_allowance: Some(Nat::from(0u8)),
+        expires_at: Some(u64::MAX),
+        memo: None,
+        created_at_time: None,
+        fee: Some(fee.into()),
+    }
+}
+
+fn make_balance_request(self_id: Principal) -> Account {
+    Account {
+        owner: self_id,
+        subaccount: None,
+    }
+}
+
+fn make_add_token_request(token: String) -> AddTokenArgs {
+    AddTokenArgs { token }
+}
+
+fn make_add_token_reply(
+    token_id: u32,
+    chain: String,
+    canister_id: Principal,
+    name: String,
+    symbol: String,
+    fee: u64,
+) -> AddTokenReply {
+    AddTokenReply::IC(ICReply {
+        token_id,
+        chain,
+        canister_id: canister_id.to_string(),
+        name,
+        symbol,
+        decimals: 8,
+        fee: Nat::from(fee),
+        icrc1: true,
+        icrc2: true,
+        icrc3: true,
+        is_removed: false,
+    })
+}
+
+fn make_update_token_request(token: String) -> UpdateTokenArgs {
+    UpdateTokenArgs { token }
+}
+
+fn make_update_token_reply(
+    token_id: u32,
+    chain: String,
+    canister_id: Principal,
+    name: String,
+    symbol: String,
+    fee: u64,
+) -> UpdateTokenReply {
+    UpdateTokenReply::IC(ICReply {
+        token_id,
+        chain,
+        canister_id: canister_id.to_string(),
+        name,
+        symbol,
+        decimals: 8,
+        fee: Nat::from(fee),
+        icrc1: true,
+        icrc2: true,
+        icrc3: true,
+        is_removed: false,
+    })
+}
+
+fn make_metadata_reply(name: String, symbol: String, fee: u64) -> Vec<(String, MetadataValue)> {
+    vec![
+        (
+            "icrc1:decimals".to_string(),
+            MetadataValue::Nat(Nat::from(8_u64)),
+        ),
+        ("icrc1:name".to_string(), MetadataValue::Text(name)),
+        ("icrc1:symbol".to_string(), MetadataValue::Text(symbol)),
+        ("icrc1:fee".to_string(), MetadataValue::Nat(Nat::from(fee))),
+        (
+            "icrc1:max_memo_length".to_string(),
+            MetadataValue::Nat(Nat::from(32_u64)),
+        ),
+        (
+            "icrc103:public_allowances".to_string(),
+            MetadataValue::Text("true".to_string()),
+        ),
+        (
+            "icrc103:max_take_value".to_string(),
+            MetadataValue::Nat(Nat::from(500_u64)),
+        ),
+    ]
+}
+
+fn make_add_pool_request(
+    token_0: String,
+    amount_0: u64,
+    token_1: String,
+    amount_1: u64,
+) -> AddPoolArgs {
+    AddPoolArgs {
+        token_0,
+        amount_0: Nat::from(amount_0),
+        tx_id_0: None,
+        token_1,
+        amount_1: Nat::from(amount_1),
+        tx_id_1: None,
+        lp_fee_bps: Some(30),
     }
 }
 
 #[tokio::test]
 async fn test_deposit_success() {
+    const FEE_SNS: u64 = 10_500u64;
+    const FEE_ICP: u64 = 9_500u64;
+    let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
+    let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
+    let token_0 = format!("IC.{}", sns_ledger);
+    let token_1 = format!("IC.{}", icp_ledger);
     // Create test assets and request first
     let asset_0 = Asset::Token {
-        ledger_canister_id: Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap(),
+        ledger_canister_id: sns_ledger,
         symbol: "DAO".to_string(),
-        ledger_fee_decimals: Nat::from(10_000u64),
+        ledger_fee_decimals: Nat::from(FEE_SNS),
     };
 
     let asset_1 = Asset::Token {
-        ledger_canister_id: Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap(),
+        ledger_canister_id: icp_ledger,
         symbol: "ICP".to_string(),
-        ledger_fee_decimals: Nat::from(10_000u64),
+        ledger_fee_decimals: Nat::from(FEE_ICP),
     };
 
     let owner_account = sns_treasury_manager::Account {
@@ -207,36 +320,147 @@ async fn test_deposit_success() {
             );
     }
 
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
     let allowances = vec![
+        // SNS
         Allowance {
             asset: asset_0,
             owner_account,
-            amount_decimals: Nat::from(500 * E8),
+            amount_decimals: Nat::from(amount_0_decimals),
         },
+        // ICP
         Allowance {
             asset: asset_1,
             owner_account,
-            amount_decimals: Nat::from(400 * E8),
+            amount_decimals: Nat::from(amount_1_decimals),
         },
     ];
 
-    let request = DepositRequest {
-        allowances: allowances.clone(),
-    };
-    let result = Ok(Some(Ok(Balances::default())));
-    // Set up mock agent with expected responses
-    let mock_agent = MockAgent::new().add_call(request.clone(), result);
+    let mock_agent = MockAgent::new()
+        .add_call(
+            sns_ledger,
+            make_approve_request(amount_0_decimals, FEE_SNS),
+            Ok(Nat::from(amount_0_decimals)),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            icp_ledger,
+            make_approve_request(amount_1_decimals, FEE_ICP),
+            Ok(Nat::from(amount_1_decimals)),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            sns_ledger,
+            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            Nat::from(amount_0_decimals - FEE_SNS),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            icp_ledger,
+            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            Nat::from(amount_1_decimals - FEE_ICP),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_token_request(token_0.clone()),
+            Ok(make_add_token_reply(
+                1,
+                "IC".to_string(),
+                sns_id,
+                "My DAO Token".to_string(),
+                "SNS".to_string(),
+                FEE_SNS,
+            )),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_token_request(token_1.clone()),
+            Ok(make_add_token_reply(
+                2,
+                "IC".to_string(),
+                icp_ledger,
+                "Internet Computer".to_string(),
+                "ICP".to_string(),
+                FEE_ICP,
+            )),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_update_token_request(token_0.clone()),
+            Ok(make_update_token_reply(
+                1,
+                "IC".to_string(),
+                sns_id,
+                "My DAO Token".to_string(),
+                "SNS".to_string(),
+                FEE_SNS,
+            )),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            sns_ledger,
+            Icrc1MetadataRequest {},
+            make_metadata_reply("My DAO Token".to_string(), "SNS".to_string(), FEE_SNS),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_update_token_request(token_1.clone()),
+            Ok(make_update_token_reply(
+                2,
+                "IC".to_string(),
+                icp_ledger,
+                "Internet Computer".to_string(),
+                "ICP".to_string(),
+                FEE_ICP,
+            )),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            icp_ledger,
+            Icrc1MetadataRequest {},
+            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_pool_request(
+                token_0,
+                amount_0_decimals - 2 * FEE_SNS,
+                token_1,
+                amount_1_decimals - 2 * FEE_ICP,
+            ),
+            Ok(AddPoolReply::default()),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID)
+        .add_call(
+            sns_ledger,
+            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            Nat::from(0_u64),
+        )
+        .commit_state(*KONG_BACKEND_CANISTER_ID);
+    // .add_call(
+    //     icp_ledger,
+    //     make_balance_request(*KONG_BACKEND_CANISTER_ID),
+    //     Nat::from(0_u64),
+    // )
+    // .commit_state(*KONG_BACKEND_CANISTER_ID);
 
-    let canister_id = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
-        canister_id,
+        *KONG_BACKEND_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
     );
 
-    let init = TreasuryManagerInit { allowances };
+    let init = TreasuryManagerInit {
+        allowances: allowances.clone(),
+    };
 
     let ValidatedTreasuryManagerInit {
         allowance_0,
@@ -252,7 +476,7 @@ async fn test_deposit_success() {
     );
 
     // This should now work without panicking
-    let result = kong_adaptor.deposit(request).await;
+    let result = kong_adaptor.deposit(DepositRequest { allowances }).await;
 
     assert_eq!(result, Ok(Balances::default()),);
 }

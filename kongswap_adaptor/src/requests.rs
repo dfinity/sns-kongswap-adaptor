@@ -93,7 +93,7 @@ impl Request for AuditTrailRequest {
     }
 }
 
-#[derive(CandidType)]
+#[derive(CandidType, Debug)]
 pub struct CommitStateRequest {}
 
 impl Request for CommitStateRequest {

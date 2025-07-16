@@ -300,7 +300,7 @@ impl Request for AddPoolArgs {
     }
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AddPoolReply {
     pub tx_id: u64,
     pub pool_id: u32,
