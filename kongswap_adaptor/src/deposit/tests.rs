@@ -4,10 +4,12 @@ use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableV
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
 use kongswap_adaptor::agent::icrc_requests::Icrc1MetadataRequest;
 use kongswap_adaptor::{agent::Request, requests::CommitStateRequest};
+use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use serde::de::DeserializeOwned;
 use sns_treasury_manager::{
-    Allowance, Asset, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit,
+    Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
+    TreasuryManagerInit,
 };
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
@@ -23,7 +25,7 @@ use crate::{
 };
 use std::fmt::Debug;
 
-const E8: u64 = 10_000_000;
+const E8: u64 = 100_000_000;
 
 #[derive(Clone, Debug)]
 pub struct MockError {
@@ -362,13 +364,13 @@ async fn test_deposit_success() {
     let allowances = vec![
         // SNS
         Allowance {
-            asset: asset_0,
+            asset: asset_0.clone(),
             owner_account,
             amount_decimals: Nat::from(amount_0_decimals),
         },
         // ICP
         Allowance {
-            asset: asset_1,
+            asset: asset_1.clone(),
             owner_account,
             amount_decimals: Nat::from(amount_1_decimals),
         },
@@ -530,8 +532,8 @@ async fn test_deposit_success() {
                 10000000000,
             ),
             Ok(make_remove_liquidity_amounts_reply(
-                amount_0_decimals - FEE_SNS,
-                amount_1_decimals - FEE_ICP,
+                amount_0_decimals - 2 * FEE_SNS,
+                amount_1_decimals - 2 * FEE_ICP,
             )),
         );
 
@@ -568,5 +570,95 @@ async fn test_deposit_success() {
         "There are still some calls remaining"
     );
 
-    assert_eq!(result, Ok(Balances::default()),);
+    let asset_0_balance = BalanceBook {
+        treasury_owner: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: Some(owner_account),
+            name: Some("SNS DAO".to_string()),
+        }),
+        treasury_manager: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: Some(sns_treasury_manager::Account {
+                owner: kong_adaptor.id,
+                subaccount: None,
+            }),
+            name: Some(format!("KongSwapAdaptor({})", kong_adaptor.id)),
+        }),
+        external_custodian: Some(Balance {
+            amount_decimals: Nat::from(amount_0_decimals - 2 * FEE_SNS),
+            account: None,
+            name: None,
+        }),
+        fee_collector: Some(Balance {
+            amount_decimals: Nat::from(2 * FEE_SNS),
+            account: None,
+            name: None,
+        }),
+        payees: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: None,
+            name: None,
+        }),
+        payers: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: None,
+            name: None,
+        }),
+        suspense: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: None,
+            name: None,
+        }),
+    };
+
+    let asset_1_balance = BalanceBook {
+        treasury_owner: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: Some(owner_account),
+            name: Some("SNS DAO".to_string()),
+        }),
+        treasury_manager: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: Some(sns_treasury_manager::Account {
+                owner: kong_adaptor.id,
+                subaccount: None,
+            }),
+            name: Some(format!("KongSwapAdaptor({})", kong_adaptor.id)),
+        }),
+        external_custodian: Some(Balance {
+            amount_decimals: Nat::from(amount_0_decimals - 2 * FEE_ICP),
+            account: None,
+            name: None,
+        }),
+        fee_collector: Some(Balance {
+            amount_decimals: Nat::from(2 * FEE_ICP),
+            account: None,
+            name: None,
+        }),
+        payees: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: None,
+            name: None,
+        }),
+        payers: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: None,
+            name: None,
+        }),
+        suspense: Some(Balance {
+            amount_decimals: Nat::from(0_u64),
+            account: None,
+            name: None,
+        }),
+    };
+
+    let balances = Balances {
+        timestamp_ns: 0,
+        asset_to_balances: Some(btreemap! {
+            asset_0 => asset_0_balance,
+            asset_1 => asset_1_balance,
+        }),
+    };
+
+    assert_eq!(result, Ok(balances));
 }
