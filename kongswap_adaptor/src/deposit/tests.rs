@@ -626,7 +626,7 @@ async fn test_deposit_success() {
             name: Some(format!("KongSwapAdaptor({})", kong_adaptor.id)),
         }),
         external_custodian: Some(Balance {
-            amount_decimals: Nat::from(amount_0_decimals - 2 * FEE_ICP),
+            amount_decimals: Nat::from(amount_1_decimals - 2 * FEE_ICP),
             account: None,
             name: None,
         }),
