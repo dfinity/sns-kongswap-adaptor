@@ -224,11 +224,11 @@ async fn e2e_test() {
     assert_eq!(balances_after_second_upgrade, balances_before_upgrade);
     assert_eq!(audit_trail_after_second_upgrade, audit_trail_before_upgrade);
 
-    use kongswap_adaptor::audit::serialize_audit_trail;
-    panic!(
-        "audit_trail = {}",
-        serialize_audit_trail(&audit_trail_after_second_upgrade, true).unwrap()
-    );
+    // use kongswap_adaptor::audit::serialize_audit_trail;
+    // panic!(
+    //     "audit_trail = {}",
+    //     serialize_audit_trail(&audit_trail_after_second_upgrade, true).unwrap()
+    // );
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
