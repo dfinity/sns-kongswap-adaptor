@@ -9,36 +9,28 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
       - uses: dtolnay/rust-toolchain@1.82.0
         with:
           targets: wasm32-unknown-unknown
+
+      # Test dependencies
       - uses: actions/setup-python@v4
         with:
           python-version: '3.12'
-      - run: wget -q https://github.com/dfinity/ic-wasm/releases/download/0.8.0/ic-wasm-linux64 -O /usr/local/bin/ic-wasm && chmod +x /usr/local/bin/ic-wasm
+
+      # Build dependencies
       - run: git clone --depth 1 https://github.com/dfinity/ic.git ../ic
+      - run: wget -q https://github.com/dfinity/ic-wasm/releases/download/0.8.0/ic-wasm-linux64 -O /usr/local/bin/ic-wasm && chmod +x /usr/local/bin/ic-wasm
+
+      # Run all tests
       - run: ./scripts/test.py --verbose
         timeout-minutes: 10
 
-  release-candidate:
-    name: Create Release Candidate
-    runs-on: ubuntu-24.04
-    needs: test
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      
-      - name: Download artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: release-artifacts
-          path: ./release-artifacts
+      # Build release artifacts for main branch
+      - name: Build release artifacts
+        if: github.ref == 'refs/heads/main'
+        run: ./scripts/build.py
       
       - name: Generate version
         id: version
@@ -48,7 +40,7 @@ jobs:
           RC_VERSION="rc-${TIMESTAMP}-${COMMIT_SHORT}"
           echo "version=${RC_VERSION}" >> $GITHUB_OUTPUT
           echo "tag=v${RC_VERSION}" >> $GITHUB_OUTPUT
-      
+
       - name: Create Release with gh CLI
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -63,5 +55,5 @@ jobs:
             
             This is an automated release candidate created after all tests passed on the main branch." \
             --prerelease \
-            ./release-artifacts/kongswap-adaptor-canister.wasm.gz \
-            ./release-artifacts/kongswap-adaptor.did
+            target/wasm32-unknown-unknown/release/kongswap-adaptor-canister.wasm.gz \
+            kongswap_adaptor/kongswap-adaptor.did
