@@ -21,3 +21,47 @@ jobs:
       - run: git clone --depth 1 https://github.com/dfinity/ic.git ../ic
       - run: ./scripts/test.py --verbose
         timeout-minutes: 10
+
+  release-candidate:
+    name: Create Release Candidate
+    runs-on: ubuntu-24.04
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: release-artifacts
+          path: ./release-artifacts
+      
+      - name: Generate version
+        id: version
+        run: |
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          RC_VERSION="rc-${TIMESTAMP}-${COMMIT_SHORT}"
+          echo "version=${RC_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag=v${RC_VERSION}" >> $GITHUB_OUTPUT
+      
+      - name: Create Release with gh CLI
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ steps.version.outputs.tag }} \
+            --title "Release Candidate ${{ steps.version.outputs.version }}" \
+            --notes "🚀 **Release Candidate ${{ steps.version.outputs.version }}**
+            
+            **Commit**: ${{ github.sha }}
+            **Branch**: ${{ github.ref_name }}
+            **Triggered by**: ${{ github.actor }}
+            
+            This is an automated release candidate created after all tests passed on the main branch." \
+            --prerelease \
+            ./release-artifacts/kongswap-adaptor-canister.wasm.gz \
+            ./release-artifacts/kongswap-adaptor.did
