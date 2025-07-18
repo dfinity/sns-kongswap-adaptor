@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 jobs:
-  test:
+  test-release-candidate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
