@@ -580,7 +580,7 @@ async fn test_deposit_success() {
     );
 
     let mut asset_0_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "SNS DAO".to_string())
+        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
         .with_treasury_manager(
             sns_treasury_manager::Account {
                 owner: kong_adaptor.id,
@@ -605,7 +605,7 @@ async fn test_deposit_success() {
     });
 
     let mut asset_1_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "SNS DAO".to_string())
+        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
         .with_treasury_manager(
             sns_treasury_manager::Account {
                 owner: kong_adaptor.id,
