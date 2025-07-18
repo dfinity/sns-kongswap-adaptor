@@ -9,7 +9,7 @@ use crate::{
 };
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
-use sns_treasury_manager::{Error, ErrorKind, TreasuryManager};
+use sns_treasury_manager::{Error, ErrorKind};
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn withdraw_from_dex(
@@ -216,7 +216,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
         };
 
-        self.refresh_balances().await;
         Ok(self.get_cached_balances())
     }
 }

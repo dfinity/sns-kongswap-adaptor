@@ -123,6 +123,8 @@ fn log(msg: &str) {
 
 impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
+        self.check_state_lock()?;
+
         let (ledger_0, ledger_1) = self.ledgers();
 
         let (default_owner_0, default_owner_1) = self.owner_accounts();
@@ -153,6 +155,8 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     async fn deposit(&mut self, request: DepositRequest) -> TreasuryManagerResult {
+        self.check_state_lock()?;
+
         let ValidatedDepositRequest {
             allowance_0,
             allowance_1,
@@ -184,6 +188,11 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     async fn refresh_balances(&mut self) {
+        if let Err(err) = self.check_state_lock() {
+            log_err(&format!("Cannot refresh balances: {:?}", err));
+            return;
+        }
+
         let mut context = OperationContext::new(Operation::Balances);
 
         let result = self.refresh_balances_impl(&mut context).await;
@@ -196,6 +205,11 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     async fn issue_rewards(&mut self) {
+        if let Err(err) = self.check_state_lock() {
+            log_err(&format!("Cannot issue rewards: {:?}", err));
+            return;
+        }
+
         let mut context = OperationContext::new(Operation::IssueReward);
 
         let result = self.issue_rewards_impl(&mut context).await;

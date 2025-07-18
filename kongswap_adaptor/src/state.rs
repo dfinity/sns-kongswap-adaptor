@@ -8,10 +8,14 @@ use crate::{
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
+use sns_treasury_manager::Error;
 use sns_treasury_manager::{AuditTrail, Transaction};
 use std::{cell::RefCell, thread::LocalKey};
 
 pub(crate) mod storage;
+
+const NS_IN_SECOND: u64 = 1_000_000_000;
+pub const MAX_LOCK_DURATION_NS: u64 = 45 * 60 * NS_IN_SECOND; // 45 minutes
 
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
     time_ns: fn() -> u64,
@@ -226,6 +230,40 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         last_entry.operation.step.is_final = true;
 
         self.push_audit_trail_transaction(last_entry);
+    }
+
+    fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
+        let now_ns = self.time_ns();
+
+        let AuditTrail { transactions } = self.get_audit_trail();
+        let Some(transaction) = transactions.last() else {
+            return None;
+        };
+
+        if transaction.treasury_manager_operation.step.is_final {
+            return None;
+        }
+
+        let acquired_timestamp_ns = transaction.timestamp_ns;
+        let expiry_timestamp_ns = acquired_timestamp_ns.saturating_add(MAX_LOCK_DURATION_NS);
+
+        if now_ns > expiry_timestamp_ns {
+            log_err(&format!("Transaction lock expired: {:?}", transaction));
+            return None;
+        }
+
+        Some(expiry_timestamp_ns.saturating_sub(now_ns))
+    }
+
+    /// Checks if the last transaction has been finalized, or if its lock has expired.
+    pub fn check_state_lock(&self) -> Result<(), Vec<Error>> {
+        if let Some(remaining_lock_duration_ns) = self.get_remaining_lock_duration_ns() {
+            return Err(vec![Error::new_temporarily_unavailable(format!(
+                "Canister state is locked. Please try again in {} seconds.",
+                remaining_lock_duration_ns / NS_IN_SECOND
+            ))]);
+        }
+        Ok(())
     }
 
     pub fn get_audit_trail(&self) -> AuditTrail {
