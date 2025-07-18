@@ -6,7 +6,6 @@ use kongswap_adaptor::agent::icrc_requests::Icrc1MetadataRequest;
 use kongswap_adaptor::{agent::Request, requests::CommitStateRequest};
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
-use serde::de::DeserializeOwned;
 use sns_treasury_manager::{
     Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
     TreasuryManagerInit,
@@ -570,87 +569,39 @@ async fn test_deposit_success() {
         "There are still some calls remaining"
     );
 
-    let asset_0_balance = BalanceBook {
-        treasury_owner: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: Some(owner_account),
-            name: Some("SNS DAO".to_string()),
-        }),
-        treasury_manager: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: Some(sns_treasury_manager::Account {
+    let asset_0_balance = BalanceBook::empty()
+        .with_treasury_owner(owner_account, "SNS DAO".to_string())
+        .with_treasury_manager(
+            sns_treasury_manager::Account {
                 owner: kong_adaptor.id,
                 subaccount: None,
-            }),
-            name: Some(format!("KongSwapAdaptor({})", kong_adaptor.id)),
-        }),
-        external_custodian: Some(Balance {
-            amount_decimals: Nat::from(amount_0_decimals - 2 * FEE_SNS),
-            account: None,
-            name: None,
-        }),
-        fee_collector: Some(Balance {
-            amount_decimals: Nat::from(2 * FEE_SNS),
-            account: None,
-            name: None,
-        }),
-        payees: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: None,
-            name: None,
-        }),
-        payers: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: None,
-            name: None,
-        }),
-        suspense: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: None,
-            name: None,
-        }),
-    };
+            },
+            format!("KongSwapAdaptor({})", kong_adaptor.id),
+        )
+        .with_external_custodian(None, None)
+        .with_suspense(None)
+        .with_fee_collector(None, None)
+        .with_payees(None, None)
+        .with_payers(None, None)
+        .fee_collector(2 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
 
-    let asset_1_balance = BalanceBook {
-        treasury_owner: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: Some(owner_account),
-            name: Some("SNS DAO".to_string()),
-        }),
-        treasury_manager: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: Some(sns_treasury_manager::Account {
+    let asset_1_balance = BalanceBook::empty()
+        .with_treasury_owner(owner_account, "SNS DAO".to_string())
+        .with_treasury_manager(
+            sns_treasury_manager::Account {
                 owner: kong_adaptor.id,
                 subaccount: None,
-            }),
-            name: Some(format!("KongSwapAdaptor({})", kong_adaptor.id)),
-        }),
-        external_custodian: Some(Balance {
-            amount_decimals: Nat::from(amount_1_decimals - 2 * FEE_ICP),
-            account: None,
-            name: None,
-        }),
-        fee_collector: Some(Balance {
-            amount_decimals: Nat::from(2 * FEE_ICP),
-            account: None,
-            name: None,
-        }),
-        payees: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: None,
-            name: None,
-        }),
-        payers: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: None,
-            name: None,
-        }),
-        suspense: Some(Balance {
-            amount_decimals: Nat::from(0_u64),
-            account: None,
-            name: None,
-        }),
-    };
+            },
+            format!("KongSwapAdaptor({})", kong_adaptor.id),
+        )
+        .with_external_custodian(None, None)
+        .with_suspense(None)
+        .with_fee_collector(None, None)
+        .with_payees(None, None)
+        .with_payers(None, None)
+        .fee_collector(2 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
 
     let balances = Balances {
         timestamp_ns: 0,
