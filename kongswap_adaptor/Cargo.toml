@@ -3,6 +3,9 @@ name = "kongswap_adaptor"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+repository.workspace = true
+license.workspace = true
+homepage.workspace = true
 
 [lib]
 name = "kongswap_adaptor"

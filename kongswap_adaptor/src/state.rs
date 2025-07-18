@@ -15,7 +15,12 @@ use std::{cell::RefCell, thread::LocalKey};
 pub(crate) mod storage;
 
 const NS_IN_SECOND: u64 = 1_000_000_000;
+
 pub const MAX_LOCK_DURATION_NS: u64 = 45 * 60 * NS_IN_SECOND; // 45 minutes
+
+/// A human-readable name for the owner of the managed funds.
+// TODO: Ideally, we would have the name of the owner / SNS.
+const TREASURY_OWNER_NAME: &str = "DAO Treasury";
 
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
     time_ns: fn() -> u64,
@@ -69,12 +74,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
             let timestamp_ns = self.time_ns();
 
+            let owner_name = TREASURY_OWNER_NAME.to_string();
+
             let validated_balances = ValidatedBalances::new(
                 timestamp_ns,
                 asset_0,
                 asset_1,
-                // TODO: Ideally, we would have the name of the owner / SNS.
-                "SNS DAO".to_string(),
+                owner_name,
                 owner_account_0,
                 owner_account_1,
                 format!("KongSwapAdaptor({})", self.id),
