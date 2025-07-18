@@ -4,10 +4,11 @@ use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableV
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
 use kongswap_adaptor::agent::icrc_requests::Icrc1MetadataRequest;
 use kongswap_adaptor::{agent::Request, requests::CommitStateRequest};
+use maplit::btreemap;
 use pretty_assertions::assert_eq;
-use serde::de::DeserializeOwned;
 use sns_treasury_manager::{
-    Allowance, Asset, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit,
+    Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
+    TreasuryManagerInit,
 };
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
@@ -23,7 +24,7 @@ use crate::{
 };
 use std::fmt::Debug;
 
-const E8: u64 = 10_000_000;
+const E8: u64 = 100_000_000;
 
 #[derive(Clone, Debug)]
 pub struct MockError {
@@ -362,13 +363,13 @@ async fn test_deposit_success() {
     let allowances = vec![
         // SNS
         Allowance {
-            asset: asset_0,
+            asset: asset_0.clone(),
             owner_account,
             amount_decimals: Nat::from(amount_0_decimals),
         },
         // ICP
         Allowance {
-            asset: asset_1,
+            asset: asset_1.clone(),
             owner_account,
             amount_decimals: Nat::from(amount_1_decimals),
         },
@@ -530,8 +531,8 @@ async fn test_deposit_success() {
                 10000000000,
             ),
             Ok(make_remove_liquidity_amounts_reply(
-                amount_0_decimals - FEE_SNS,
-                amount_1_decimals - FEE_ICP,
+                amount_0_decimals - 2 * FEE_SNS,
+                amount_1_decimals - 2 * FEE_ICP,
             )),
         );
 
@@ -568,5 +569,64 @@ async fn test_deposit_success() {
         "There are still some calls remaining"
     );
 
-    assert_eq!(result, Ok(Balances::default()),);
+    let mut asset_0_balance = BalanceBook::empty()
+        .with_treasury_owner(owner_account, "SNS DAO".to_string())
+        .with_treasury_manager(
+            sns_treasury_manager::Account {
+                owner: kong_adaptor.id,
+                subaccount: None,
+            },
+            format!("KongSwapAdaptor({})", kong_adaptor.id),
+        )
+        .with_external_custodian(None, None)
+        .with_suspense(None)
+        .with_fee_collector(None, None)
+        .fee_collector(2 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+    asset_0_balance.payees = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
+    asset_0_balance.payers = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
+
+    let mut asset_1_balance = BalanceBook::empty()
+        .with_treasury_owner(owner_account, "SNS DAO".to_string())
+        .with_treasury_manager(
+            sns_treasury_manager::Account {
+                owner: kong_adaptor.id,
+                subaccount: None,
+            },
+            format!("KongSwapAdaptor({})", kong_adaptor.id),
+        )
+        .with_external_custodian(None, None)
+        .with_suspense(None)
+        .with_fee_collector(None, None)
+        .fee_collector(2 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
+
+    asset_1_balance.payees = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
+    asset_1_balance.payers = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
+
+    let balances = Balances {
+        timestamp_ns: 0,
+        asset_to_balances: Some(btreemap! {
+            asset_0 => asset_0_balance,
+            asset_1 => asset_1_balance,
+        }),
+    };
+
+    assert_eq!(result, Ok(balances));
 }

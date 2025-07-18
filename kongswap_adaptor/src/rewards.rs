@@ -11,10 +11,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let (withdraw_account_0, withdraw_account_1) = self.owner_accounts();
 
-        let returned_amounts = self
-            .return_remaining_assets_to_owner(context, withdraw_account_0, withdraw_account_1)
-            .await?;
-
-        Ok(())
+        self.return_remaining_assets_to_owner(context, withdraw_account_0, withdraw_account_1)
+            .await
     }
 }
