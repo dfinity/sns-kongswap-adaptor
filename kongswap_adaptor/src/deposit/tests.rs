@@ -569,7 +569,7 @@ async fn test_deposit_success() {
         "There are still some calls remaining"
     );
 
-    let asset_0_balance = BalanceBook::empty()
+    let mut asset_0_balance = BalanceBook::empty()
         .with_treasury_owner(owner_account, "SNS DAO".to_string())
         .with_treasury_manager(
             sns_treasury_manager::Account {
@@ -581,12 +581,20 @@ async fn test_deposit_success() {
         .with_external_custodian(None, None)
         .with_suspense(None)
         .with_fee_collector(None, None)
-        .with_payees(None, None)
-        .with_payers(None, None)
         .fee_collector(2 * FEE_SNS)
         .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+    asset_0_balance.payees = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
+    asset_0_balance.payers = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
 
-    let asset_1_balance = BalanceBook::empty()
+    let mut asset_1_balance = BalanceBook::empty()
         .with_treasury_owner(owner_account, "SNS DAO".to_string())
         .with_treasury_manager(
             sns_treasury_manager::Account {
@@ -598,10 +606,19 @@ async fn test_deposit_success() {
         .with_external_custodian(None, None)
         .with_suspense(None)
         .with_fee_collector(None, None)
-        .with_payees(None, None)
-        .with_payers(None, None)
         .fee_collector(2 * FEE_ICP)
         .external_custodian(amount_1_decimals - 2 * FEE_ICP);
+
+    asset_1_balance.payees = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
+    asset_1_balance.payers = Some(Balance {
+        amount_decimals: 0_u64.into(),
+        account: None,
+        name: None,
+    });
 
     let balances = Balances {
         timestamp_ns: 0,
