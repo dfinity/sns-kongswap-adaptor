@@ -235,7 +235,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
         let now_ns = ic_cdk::api::time();
 
-        let Some(transaction) = self.with_audit_trail_mut(|audit_trail| {
+        let Some(transaction) = self.get_audit_trail(|audit_trail| {
             let len = audit_trail.len();
             audit_trail.get(len.saturating_sub(1))
         }) else {

@@ -206,7 +206,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
 
     async fn issue_rewards(&mut self) {
         if let Err(err) = self.check_state_lock() {
-            log_err(&format!("Cannot refresh balances: {:?}", err));
+            log_err(&format!("Cannot issue rewards: {:?}", err));
             return;
         }
 
