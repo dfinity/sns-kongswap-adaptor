@@ -235,14 +235,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
         let now_ns = ic_cdk::api::time();
 
-        let Some(transaction) = self.get_audit_trail(|audit_trail| {
-            let len = audit_trail.len();
-            audit_trail.get(len.saturating_sub(1))
-        }) else {
+        let AuditTrail { transactions } = self.get_audit_trail();
+        let Some(transaction) = transactions.last() else {
             return None;
         };
 
-        if transaction.operation.step.is_final {
+        if transaction.treasury_manager_operation.step.is_final {
             return None;
         }
 
