@@ -205,7 +205,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             errors.extend(err.into_iter());
         }
 
-        let returned_amounts = match self
+        match self
             .return_remaining_assets_to_owner(context, withdraw_account_0, withdraw_account_1)
             .await
         {

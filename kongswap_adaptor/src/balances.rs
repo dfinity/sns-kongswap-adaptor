@@ -7,7 +7,7 @@ use crate::{
     validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalance, ValidatedSymbol},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
-use candid::{CandidType, Principal};
+use candid::CandidType;
 use icrc_ledger_types::{icrc::generic_metadata_value::MetadataValue, icrc1::account::Account};
 use kongswap_adaptor::{
     agent::{icrc_requests::Icrc1MetadataRequest, AbstractAgent},

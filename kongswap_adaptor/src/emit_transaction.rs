@@ -2,10 +2,11 @@ use crate::{
     log_err,
     state::{storage::StableTransaction, KongSwapAdaptor},
 };
-use candid::Principal;
+use candid::{CandidType, Principal};
 use kongswap_adaptor::agent::{AbstractAgent, Request};
 use kongswap_adaptor::requests::CommitStateRequest;
 use sns_treasury_manager::{Error, TreasuryManagerOperation};
+use std::fmt::Debug;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Performs the request call and records the transaction in the audit trail.
@@ -17,7 +18,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         human_readable: String,
     ) -> Result<R::Ok, Error>
     where
-        R: Request + Clone,
+        R: Request + Clone + CandidType + Debug,
     {
         let call_result = self
             .agent

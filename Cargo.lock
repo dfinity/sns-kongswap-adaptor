@@ -1263,6 +1263,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b5c7628eac357aecda461130f8074468be5aa4d258a002032d82d817f79f1f8"
 
 [[package]]
+name = "ic-nns-constants"
+version = "0.9.0"
+dependencies = [
+ "ic-base-types",
+ "maplit",
+]
+
+[[package]]
 name = "ic-protobuf"
 version = "0.9.0"
 dependencies = [
@@ -1351,6 +1359,7 @@ dependencies = [
  "ic-ledger-canister-core",
  "ic-ledger-core",
  "ic-ledger-hash-of",
+ "ic-nns-constants",
  "ic-stable-structures",
  "icrc-ledger-types 0.1.10",
  "lazy_static",
