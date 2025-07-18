@@ -26,6 +26,13 @@ use std::fmt::Debug;
 
 const E8: u64 = 100_000_000;
 
+use lazy_static::lazy_static;
+
+lazy_static! {
+    static ref SELF_CANISTER_ID: Principal =
+        Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
+}
+
 #[derive(Clone, Debug)]
 pub struct MockError {
     pub message: String,
@@ -100,7 +107,8 @@ impl MockAgent {
         let call = CallSpec::new(canister_id, request, response)
             .expect("Creating a new call specification failed");
         self.expected_calls.push_back(call);
-        let commit_state = CallSpec::new(*KONG_BACKEND_CANISTER_ID, CommitStateRequest {}, ())
+
+        let commit_state = CallSpec::new(*SELF_CANISTER_ID, CommitStateRequest {}, ())
             .expect("CommittState call creation failed");
         self.expected_calls.push_back(commit_state);
         self
@@ -134,12 +142,13 @@ impl AbstractAgent for MockAgent {
             println!("{:?}\n{:?}", raw_request, expected_call.raw_request);
             panic!("Request doesn't match");
         }
-        let canister_id = canister_id.into();
+        let canister_id: Principal = canister_id.into();
 
-        if canister_id != expected_call.canister_id {
-            println!("request canister id: {}", canister_id);
-            panic!("Canister IDs doesn't match");
-        }
+        assert_eq!(
+            canister_id, expected_call.canister_id,
+            "observed {canister_id}, expected {}",
+            expected_call.canister_id
+        );
 
         let reply = candid::decode_one::<R::Response>(&expected_call.raw_response)
             .expect("Unable to decode the response");
@@ -312,6 +321,7 @@ async fn test_deposit_success() {
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
     let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
+
     let token_0 = format!("IC.{}", sns_ledger);
     let token_1 = format!("IC.{}", icp_ledger);
     // Create test assets and request first
@@ -388,12 +398,12 @@ async fn test_deposit_success() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            make_balance_request(*SELF_CANISTER_ID),
             Nat::from(amount_0_decimals - FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            make_balance_request(*SELF_CANISTER_ID),
             Nat::from(amount_1_decimals - FEE_ICP),
         )
         .add_call(
@@ -466,22 +476,22 @@ async fn test_deposit_success() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            make_balance_request(*SELF_CANISTER_ID),
             Nat::from(0_u64),
         )
         .add_call(
-            icp_ledger,
-            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            icp_ledger, // @todo
+            make_balance_request(*SELF_CANISTER_ID),
             Nat::from(0_u64),
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            make_balance_request(*SELF_CANISTER_ID),
             Nat::from(0_u64),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*KONG_BACKEND_CANISTER_ID),
+            make_balance_request(*SELF_CANISTER_ID),
             Nat::from(0_u64),
         )
         .add_call(
@@ -520,7 +530,7 @@ async fn test_deposit_success() {
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
-            make_user_balances_request(*KONG_BACKEND_CANISTER_ID),
+            make_user_balances_request(*SELF_CANISTER_ID),
             Ok(vec![make_user_balance_reply()]),
         )
         .add_call(
@@ -539,7 +549,7 @@ async fn test_deposit_success() {
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
-        *KONG_BACKEND_CANISTER_ID,
+        *SELF_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
     );

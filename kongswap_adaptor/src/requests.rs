@@ -1,6 +1,5 @@
 use crate::agent::Request;
 use candid::CandidType;
-use serde::Deserialize;
 use sns_treasury_manager::{
     AuditTrail, AuditTrailRequest, BalancesRequest, DepositRequest, TreasuryManagerResult,
     WithdrawRequest,

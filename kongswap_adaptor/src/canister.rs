@@ -13,8 +13,7 @@ use kongswap_adaptor::audit::OperationContext;
 use lazy_static::lazy_static;
 use sns_treasury_manager::{
     Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest, Error,
-    Operation, Transaction, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
-    WithdrawRequest,
+    Operation, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult, WithdrawRequest,
 };
 use state::KongSwapAdaptor;
 use std::{cell::RefCell, time::Duration};
