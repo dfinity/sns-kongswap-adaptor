@@ -1,9 +1,10 @@
 use crate::{
-    balances::ValidatedBalances,
+    balances::{Party, ValidatedBalances},
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddPoolArgs,
     },
-    validation::{saturating_sub, ValidatedAllowance},
+    tx_error_codes::TransactionErrorCodes,
+    validation::{decode_nat_to_u64, saturating_sub, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
@@ -87,6 +88,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 human_readable,
             )
             .await?;
+
+            // Charge approval fees
+            self.charge_fee(*asset);
         }
 
         Ok(())
@@ -97,7 +101,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         context: &mut OperationContext,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<(), Error> {
+    ) -> Result<(Nat, Nat), Error> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
@@ -148,9 +152,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let request = AddLiquidityArgs {
             token_0,
-            amount_0,
+            amount_0: amount_0.clone(),
             token_1,
-            amount_1,
+            amount_1: amount_1.clone(),
 
             // Not needed for the ICRC2 flow.
             tx_id_0: None,
@@ -165,7 +169,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         )
         .await?;
 
-        Ok(())
+        Ok((amount_0, amount_1))
     }
 
     fn is_pool_already_deployed_error(&self, message: String) -> bool {
@@ -189,6 +193,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
+        let mut amount_0 = Nat::from(allowance_0.amount_decimals);
+        let mut amount_1 = Nat::from(allowance_1.amount_decimals);
         let balances_before = self.get_ledger_balances(context).await?;
 
         let result = self.add_pool(context, allowance_0, allowance_1).await;
@@ -201,11 +207,42 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         {
             if self.is_pool_already_deployed_error(message) {
                 // If the pool already exists, we can proceed with a top-up.
-                self.topup_pool(context, allowance_0, allowance_1)
+                (amount_0, amount_1) = self
+                    .topup_pool(context, allowance_0, allowance_1)
                     .await
                     .map_err(|err| vec![err])?;
             }
         }
+
+        // Actully transferred amounts
+        let amount_0_decimals = decode_nat_to_u64(amount_0).map_err(|err| {
+            vec![Error {
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+                message: err,
+                kind: ErrorKind::Postcondition {},
+            }]
+        })?;
+        let amount_1_decimals = decode_nat_to_u64(amount_1).map_err(|err| {
+            vec![Error {
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+                message: err,
+                kind: ErrorKind::Postcondition {},
+            }]
+        })?;
+
+        // If pool wasn't deployed, funds are moved to the pool
+        self.move_asset(
+            allowance_0.asset,
+            amount_0_decimals,
+            Party::TreasuryManager,
+            Party::External,
+        );
+        self.move_asset(
+            allowance_1.asset,
+            amount_1_decimals,
+            Party::TreasuryManager,
+            Party::External,
+        );
 
         let balances_after = self.get_ledger_balances(context).await?;
 
@@ -213,14 +250,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             allowance_0.asset,
             balances_before.0,
             balances_after.0,
-            allowance_0.amount_decimals,
+            amount_0_decimals,
             true,
         );
         self.find_discrepency(
             allowance_1.asset,
             balances_before.1,
             balances_after.1,
-            allowance_1.amount_decimals,
+            amount_1_decimals,
             true,
         );
 
@@ -322,3 +359,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

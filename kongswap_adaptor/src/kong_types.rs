@@ -300,7 +300,7 @@ impl Request for AddPoolArgs {
     }
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AddPoolReply {
     pub tx_id: u64,
     pub pool_id: u32,
@@ -406,7 +406,7 @@ pub struct RemoveLiquidityAmountsArgs {
     pub remove_lp_token_amount: Nat,
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, Default)]
 pub struct RemoveLiquidityAmountsReply {
     pub symbol: String,
     pub chain_0: String,
@@ -526,7 +526,7 @@ pub enum UserBalancesReply {
     LP(UserBalanceLPReply),
 }
 
-#[derive(CandidType, Clone, Debug, Serialize, Deserialize)]
+#[derive(CandidType, Clone, Debug, Serialize, Deserialize, Default)]
 pub struct UserBalanceLPReply {
     pub symbol: String,
     pub name: String,

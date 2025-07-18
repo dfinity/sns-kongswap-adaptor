@@ -74,7 +74,7 @@ def main():
         cargo_test_cmd.append("--verbose")
     
     if args.unit_only:
-        cargo_test_cmd.append("--lib")
+        cargo_test_cmd.extend(["--bin", "kongswap-adaptor-canister"])
     elif args.integration_only:
         cargo_test_cmd.extend(["--test", "e2e"])
     

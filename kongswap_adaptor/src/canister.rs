@@ -13,8 +13,7 @@ use kongswap_adaptor::audit::OperationContext;
 use lazy_static::lazy_static;
 use sns_treasury_manager::{
     Allowance, AuditTrail, AuditTrailRequest, Balances, BalancesRequest, DepositRequest, Error,
-    Operation, Transaction, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult,
-    WithdrawRequest,
+    Operation, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult, WithdrawRequest,
 };
 use state::KongSwapAdaptor;
 use std::{cell::RefCell, time::Duration};
@@ -76,8 +75,18 @@ thread_local! {
 
 }
 
+fn time_ns() -> u64 {
+    ic_cdk::api::time()
+}
+
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
-    KongSwapAdaptor::new(CdkAgent::new(), ic_cdk::id(), &BALANCES, &AUDIT_TRAIL)
+    KongSwapAdaptor::new(
+        time_ns,
+        CdkAgent::new(),
+        ic_cdk::id(),
+        &BALANCES,
+        &AUDIT_TRAIL,
+    )
 }
 
 fn check_access() {
@@ -102,7 +111,13 @@ fn log_err(msg: &str) {
 
 fn log(msg: &str) {
     let msg = format!("[KongSwapAdaptor] {}", msg);
-    ic_cdk::print(&msg);
+
+    if cfg!(target_arch = "wasm32") {
+        ic_cdk::print(&msg);
+    } else {
+        println!("{}", msg);
+    }
+
     log!(LOG, "{}", msg);
 }
 
@@ -161,11 +176,7 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     fn audit_trail(&self, _request: AuditTrailRequest) -> AuditTrail {
-        let transactions = self
-            .audit_trail
-            .with_borrow(|audit_trail| audit_trail.iter().map(Transaction::from).collect());
-
-        AuditTrail { transactions }
+        self.get_audit_trail()
     }
 
     fn balances(&self, _request: BalancesRequest) -> TreasuryManagerResult {

@@ -21,7 +21,7 @@ impl PocketIcAgent {
         self.pocket_ic.clone()
     }
 
-    pub fn with_sender(&mut self, sender: impl Into<Principal>) -> &Self {
+    pub fn with_sender(&mut self, sender: impl Into<Principal>) -> &mut Self {
         self.sender = sender.into();
         self
     }
@@ -41,7 +41,7 @@ impl AbstractAgent for PocketIcAgent {
     type Error = PocketIcCallError;
 
     async fn call<R: Request>(
-        &self,
+        &mut self,
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {
