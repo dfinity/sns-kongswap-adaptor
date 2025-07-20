@@ -132,14 +132,19 @@ impl MockClock {
 struct MockAgent {
     // Add fields to control mock behavior
     current_stack: usize,
+    current_instruction: usize,
     calls_stacks: HashMap<usize, VecDeque<CallSpec>>,
+    // source stack id, source instruction id, destination stack id, destination instruction id
+    switching_context: Option<(usize, usize, usize, usize)>,
 }
 
 impl MockAgent {
-    fn new() -> Self {
+    fn new(switching_context: Option<(usize, usize, usize, usize)>) -> Self {
         Self {
             current_stack: 0,
+            current_instruction: 0,
             calls_stacks: HashMap::<usize, VecDeque<CallSpec>>::default(),
+            switching_context,
         }
     }
 
@@ -194,7 +199,11 @@ impl AbstractAgent for MockAgent {
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {
-        println!("started call...");
+        println!(
+            "started call: instruction #[{}], stack {}",
+            self.current_instruction, self.current_stack
+        );
+
         let Ok(raw_request) = request.payload() else {
             panic!("Cannot encode the request");
         };
@@ -223,6 +232,29 @@ impl AbstractAgent for MockAgent {
             .expect("Unable to decode the response");
 
         println!("successfully called canister ID: {}", canister_id);
+
+        self.current_instruction += 1;
+
+        if let Some((
+            source_stack,
+            source_instruction,
+            destination_stack,
+            destination_instruction,
+        )) = self.switching_context
+        {
+            if self.current_stack == source_stack && self.current_instruction == source_instruction
+            {
+                self.current_stack = destination_stack;
+                self.current_instruction = destination_instruction;
+
+                // To simulate a delay in asynchronous calls
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+                self.current_stack = source_stack;
+                self.current_instruction = source_instruction;
+            }
+        }
+
         return Ok(reply);
     }
 }
@@ -572,8 +604,11 @@ fn add_happy_deposit_calls(
         )
 }
 
+// This test models when the second deposit starts right after the
+// first deposit is finished. As the last entity on the audit trail
+// is finialised, lock is released.
 #[tokio::test]
-async fn test_lock() {
+async fn test_lock_sequential_deposits() {
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
             RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -617,7 +652,7 @@ async fn test_lock() {
         },
     ];
 
-    let mut mock_agent = MockAgent::new();
+    let mut mock_agent = MockAgent::new(None);
     // We have two sequences of deposits.
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 1);
@@ -740,4 +775,266 @@ async fn test_lock() {
             "There are still some calls remaining"
         );
     }
+}
+
+// This test models the scenario, in which the second deposit call
+// starts in the middle of the first deposit call.
+#[tokio::test]
+async fn test_lock_interleaving_should_not_pass() {
+    thread_local! {
+        static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+            RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
+
+        static BALANCES: RefCell<StableBalances> =
+            MEMORY_MANAGER.with(|memory_manager|
+                RefCell::new(
+                    StableCell::init(
+                        memory_manager.borrow().get(BALANCES_MEMORY_ID),
+                        ConfigState::default()
+                    )
+                    .expect("BALANCES init should not cause errors")
+                )
+            );
+
+        static AUDIT_TRAIL: RefCell<StableAuditTrail> =
+            MEMORY_MANAGER.with(|memory_manager|
+                RefCell::new(
+                    StableVec::init(
+                        memory_manager.borrow().get(AUDIT_TRAIL_MEMORY_ID)
+                    )
+                    .expect("AUDIT_TRAIL init should not cause errors")
+                )
+            );
+    }
+
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
+    let allowances = vec![
+        // SNS
+        Allowance {
+            asset: ASSET_0.clone(),
+            owner_account: *OWNER_ACCOUNT,
+            amount_decimals: Nat::from(amount_0_decimals),
+        },
+        // ICP
+        Allowance {
+            asset: ASSET_1.clone(),
+            owner_account: *OWNER_ACCOUNT,
+            amount_decimals: Nat::from(amount_1_decimals),
+        },
+    ];
+
+    // Upon reaching the instruction id 1, we switch to the beginning of
+    // the stack id 1.
+    let mut mock_agent = MockAgent::new(Some((0, 2, 1, 0)));
+
+    // We have two sequences of deposits.
+    mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
+    mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 1);
+
+    let mock_clock = MockClock::default();
+    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
+
+    let kong_adaptor = KongSwapAdaptor::new(
+        mock_clock.get_timer(),
+        Arc::clone(&mock_agent),
+        *SELF_CANISTER_ID,
+        &BALANCES,
+        &AUDIT_TRAIL,
+    );
+
+    let init = TreasuryManagerInit {
+        allowances: allowances.clone(),
+    };
+
+    let ValidatedTreasuryManagerInit {
+        allowance_0,
+        allowance_1,
+    } = init.try_into().unwrap();
+
+    // Initialize and test
+    kong_adaptor.initialize(
+        allowance_0.asset,
+        allowance_1.asset,
+        allowance_0.owner_account,
+        allowance_1.owner_account,
+    );
+
+    struct UnsafeKongSwapAdaptor(UnsafeCell<KongSwapAdaptor<MockAgent>>);
+    unsafe impl Sync for UnsafeKongSwapAdaptor {}
+    unsafe impl Send for UnsafeKongSwapAdaptor {}
+
+    let kong_adaptor_shared = Arc::new(UnsafeKongSwapAdaptor(UnsafeCell::new(kong_adaptor)));
+
+    let t1 = {
+        let kongswap_adaptor = Arc::clone(&kong_adaptor_shared);
+        let allowances = allowances.clone();
+        tokio::spawn(async move {
+            unsafe {
+                let kongswap_adaptor = &mut *kongswap_adaptor.0.get();
+                let _ = kongswap_adaptor
+                    .deposit(DepositRequest {
+                        allowances: allowances.clone(),
+                    })
+                    .await;
+            }
+        })
+    };
+
+    // Wait for t1 to yield
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    let t2 = {
+        let kongswap_adaptor = Arc::clone(&kong_adaptor_shared);
+        let allowances = allowances.clone();
+        tokio::spawn(async move {
+            unsafe {
+                let kongswap_adaptor = &mut *kongswap_adaptor.0.get();
+                let result = kongswap_adaptor
+                    .deposit(DepositRequest {
+                        allowances: allowances.clone(),
+                    })
+                    .await;
+
+                let expected_error = Err(vec![sns_treasury_manager::Error {
+                    code: 5, // temporary unavailable
+                    message: "Canister state is locked. Please try again in 2700 seconds."
+                        .to_string(),
+                    kind: sns_treasury_manager::ErrorKind::TemporarilyUnavailable {},
+                }]);
+                assert_eq!(result, expected_error);
+            }
+        })
+    };
+
+    let _ = tokio::join!(t1, t2);
+}
+
+// This test models the scenario, in which the second deposit call
+// starts in the middle of the first deposit call, while the first
+// deposit has been pending for an hour.
+#[tokio::test]
+async fn test_lock_interleaving_should_pass() {
+    thread_local! {
+        static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
+            RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
+
+        static BALANCES: RefCell<StableBalances> =
+            MEMORY_MANAGER.with(|memory_manager|
+                RefCell::new(
+                    StableCell::init(
+                        memory_manager.borrow().get(BALANCES_MEMORY_ID),
+                        ConfigState::default()
+                    )
+                    .expect("BALANCES init should not cause errors")
+                )
+            );
+
+        static AUDIT_TRAIL: RefCell<StableAuditTrail> =
+            MEMORY_MANAGER.with(|memory_manager|
+                RefCell::new(
+                    StableVec::init(
+                        memory_manager.borrow().get(AUDIT_TRAIL_MEMORY_ID)
+                    )
+                    .expect("AUDIT_TRAIL init should not cause errors")
+                )
+            );
+    }
+
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
+    let allowances = vec![
+        // SNS
+        Allowance {
+            asset: ASSET_0.clone(),
+            owner_account: *OWNER_ACCOUNT,
+            amount_decimals: Nat::from(amount_0_decimals),
+        },
+        // ICP
+        Allowance {
+            asset: ASSET_1.clone(),
+            owner_account: *OWNER_ACCOUNT,
+            amount_decimals: Nat::from(amount_1_decimals),
+        },
+    ];
+
+    // Upon reaching the instruction id 1, we switch to the beginning of
+    // the stack id 1.
+    let mut mock_agent = MockAgent::new(Some((0, 2, 1, 0)));
+
+    // We have two sequences of deposits.
+    mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
+    mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 1);
+
+    let mut mock_clock = MockClock::default();
+    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
+
+    let kong_adaptor = KongSwapAdaptor::new(
+        mock_clock.get_timer(),
+        Arc::clone(&mock_agent),
+        *SELF_CANISTER_ID,
+        &BALANCES,
+        &AUDIT_TRAIL,
+    );
+
+    let init = TreasuryManagerInit {
+        allowances: allowances.clone(),
+    };
+
+    let ValidatedTreasuryManagerInit {
+        allowance_0,
+        allowance_1,
+    } = init.try_into().unwrap();
+
+    // Initialize and test
+    kong_adaptor.initialize(
+        allowance_0.asset,
+        allowance_1.asset,
+        allowance_0.owner_account,
+        allowance_1.owner_account,
+    );
+
+    struct UnsafeKongSwapAdaptor(UnsafeCell<KongSwapAdaptor<MockAgent>>);
+    unsafe impl Sync for UnsafeKongSwapAdaptor {}
+    unsafe impl Send for UnsafeKongSwapAdaptor {}
+
+    let kong_adaptor_shared = Arc::new(UnsafeKongSwapAdaptor(UnsafeCell::new(kong_adaptor)));
+
+    let t1 = {
+        let kongswap_adaptor = Arc::clone(&kong_adaptor_shared);
+        let allowances = allowances.clone();
+        tokio::spawn(async move {
+            unsafe {
+                let kongswap_adaptor = &mut *kongswap_adaptor.0.get();
+                let _ = kongswap_adaptor
+                    .deposit(DepositRequest {
+                        allowances: allowances.clone(),
+                    })
+                    .await;
+            }
+        })
+    };
+
+    // Wait for t1 to yield
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+    let t2 = {
+        let kongswap_adaptor = Arc::clone(&kong_adaptor_shared);
+        let allowances = allowances.clone();
+        tokio::spawn(async move {
+            unsafe {
+                let kongswap_adaptor = &mut *kongswap_adaptor.0.get();
+                mock_clock.advance_time(60 * 60 * 1_000_000_000);
+                let result = kongswap_adaptor
+                    .deposit(DepositRequest {
+                        allowances: allowances.clone(),
+                    })
+                    .await;
+
+                assert!(result.is_ok(), "Lock should have been expired");
+            }
+        })
+    };
+
+    let _ = tokio::join!(t1, t2);
 }

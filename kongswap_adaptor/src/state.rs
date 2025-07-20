@@ -256,14 +256,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
         let now_ns = self.time_ns();
-        println!("now: {}", now_ns);
 
         let AuditTrail { transactions } = self.get_audit_trail();
         let Some(transaction) = transactions.last() else {
             return None;
         };
 
-        println!("transaction: {:#?}", transaction);
         if transaction.treasury_manager_operation.step.is_final {
             return None;
         }
