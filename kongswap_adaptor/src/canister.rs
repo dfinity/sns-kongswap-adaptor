@@ -1,4 +1,5 @@
 use crate::state::storage::{ConfigState, StableTransaction};
+use crate::state::UnsafeSyncCell;
 use crate::validation::{
     ValidatedDepositRequest, ValidatedTreasuryManagerInit, ValidatedWithdrawRequest,
 };
@@ -16,6 +17,7 @@ use sns_treasury_manager::{
     Operation, TreasuryManager, TreasuryManagerArg, TreasuryManagerResult, WithdrawRequest,
 };
 use state::KongSwapAdaptor;
+use std::sync::Arc;
 use std::{cell::RefCell, time::Duration};
 
 mod balances;
@@ -82,7 +84,7 @@ fn time_ns() -> u64 {
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
     KongSwapAdaptor::new(
         Box::new(time_ns),
-        CdkAgent::new(),
+        Arc::new(UnsafeSyncCell::new(CdkAgent::new())),
         ic_cdk::id(),
         &BALANCES,
         &AUDIT_TRAIL,

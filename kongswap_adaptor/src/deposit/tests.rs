@@ -10,6 +10,7 @@ use sns_treasury_manager::{
     Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
     TreasuryManagerInit,
 };
+use std::sync::Arc;
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
 use super::*;
@@ -18,6 +19,7 @@ use crate::kong_types::{
     RemoveLiquidityAmountsReply, UpdateTokenArgs, UpdateTokenReply, UserBalanceLPReply,
     UserBalancesArgs, UserBalancesReply,
 };
+use crate::state::UnsafeSyncCell;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
@@ -546,9 +548,10 @@ async fn test_deposit_success() {
             )),
         );
 
+    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
     let mut kong_adaptor = KongSwapAdaptor::new(
         Box::new(|| 0), // Mock time function
-        mock_agent,
+        Arc::clone(&mock_agent),
         *SELF_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
@@ -574,10 +577,11 @@ async fn test_deposit_success() {
     // This should now work without panicking
     let result = kong_adaptor.deposit(DepositRequest { allowances }).await;
 
-    assert!(
-        kong_adaptor.agent.finished_calls(),
-        "There are still some calls remaining"
-    );
+    let finished_calls = unsafe {
+        let x = kong_adaptor.agent.as_ref().0.get();
+        (*x).finished_calls()
+    };
+    assert!(finished_calls, "There are still some calls remaining");
 
     let mut asset_0_balance = BalanceBook::empty()
         .with_treasury_owner(owner_account, "DAO Treasury".to_string())
