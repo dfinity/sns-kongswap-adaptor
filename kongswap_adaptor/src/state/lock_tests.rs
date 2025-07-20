@@ -721,12 +721,23 @@ async fn test_lock() {
     };
 
     assert_eq!(result, Ok(balances));
-    // assert!(mock_agent.context_finished_calls(0));
+    unsafe {
+        assert!(
+            (*mock_agent.0.get()).context_finished_calls(0),
+            "Not all calls from context 0 are used"
+        );
+    };
+
+    unsafe {
+        (*mock_agent.0.get()).context_switch(1);
+    }
 
     let _ = kong_adaptor.deposit(DepositRequest { allowances }).await;
 
-    // assert!(
-    //     kong_adaptor.agent.blocking_lock().finished_calls(),
-    //     "There are still some calls remaining"
-    // );
+    unsafe {
+        assert!(
+            (*mock_agent.0.get()).finished_calls(),
+            "There are still some calls remaining"
+        );
+    }
 }
