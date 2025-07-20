@@ -81,7 +81,7 @@ fn time_ns() -> u64 {
 
 fn canister_state() -> KongSwapAdaptor<CdkAgent> {
     KongSwapAdaptor::new(
-        time_ns,
+        Box::new(time_ns),
         CdkAgent::new(),
         ic_cdk::id(),
         &BALANCES,

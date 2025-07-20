@@ -1,7 +1,8 @@
-use candid::{CandidType, Principal};
+use candid::{CandidType, Nat, Principal};
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
+use icrc_ledger_types::icrc2::approve::ApproveArgs;
 use kongswap_adaptor::agent::icrc_requests::Icrc1MetadataRequest;
 use kongswap_adaptor::{agent::Request, requests::CommitStateRequest};
 use maplit::btreemap;
@@ -10,14 +11,16 @@ use sns_treasury_manager::{
     Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
     TreasuryManagerInit,
 };
+use std::sync::{Arc, Mutex};
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
 use super::*;
 use crate::kong_types::{
-    AddPoolReply, AddTokenArgs, AddTokenReply, ICReply, RemoveLiquidityAmountsArgs,
+    AddPoolArgs, AddPoolReply, AddTokenArgs, AddTokenReply, ICReply, RemoveLiquidityAmountsArgs,
     RemoveLiquidityAmountsReply, UpdateTokenArgs, UpdateTokenReply, UserBalanceLPReply,
     UserBalancesArgs, UserBalancesReply,
 };
+use crate::KONG_BACKEND_CANISTER_ID;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
@@ -60,7 +63,6 @@ impl Display for MockError {
 
 impl Error for MockError {}
 
-// TODO use Result to store reply and failure
 struct CallSpec {
     raw_request: Vec<u8>,
     raw_response: Vec<u8>,
@@ -80,6 +82,22 @@ impl CallSpec {
             raw_response,
             canister_id,
         })
+    }
+}
+
+#[derive(Default)]
+struct MockClock {
+    time_ns: Arc<Mutex<u64>>,
+}
+
+impl MockClock {
+    fn advance_time(&mut self, step: u64) {
+        *self.time_ns.lock().unwrap() += step;
+    }
+
+    fn get_timer(&self) -> Box<dyn Fn() -> u64 + Send + Sync> {
+        let time_ns = Arc::clone(&self.time_ns);
+        Box::new(move || *time_ns.lock().unwrap())
     }
 }
 
@@ -315,7 +333,7 @@ fn make_remove_liquidity_amounts_reply(
 }
 
 #[tokio::test]
-async fn test_deposit_success() {
+async fn test_lock() {
     const FEE_SNS: u64 = 10_500u64;
     const FEE_ICP: u64 = 9_500u64;
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
@@ -546,8 +564,10 @@ async fn test_deposit_success() {
             )),
         );
 
+    let mut mock_clock = MockClock::default();
+
     let mut kong_adaptor = KongSwapAdaptor::new(
-        Box::new(|| 0), // Mock time function
+        mock_clock.get_timer(),
         mock_agent,
         *SELF_CANISTER_ID,
         &BALANCES,

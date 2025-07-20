@@ -23,7 +23,7 @@ pub const MAX_LOCK_DURATION_NS: u64 = 45 * 60 * NS_IN_SECOND; // 45 minutes
 const TREASURY_OWNER_NAME: &str = "DAO Treasury";
 
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
-    time_ns: fn() -> u64,
+    time_ns: Box<dyn Fn() -> u64 + Send + Sync>,
     pub agent: A,
     pub id: Principal,
     balances: &'static LocalKey<RefCell<StableBalances>>,
@@ -32,7 +32,7 @@ pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn new(
-        time_ns: fn() -> u64,
+        time_ns: Box<dyn Fn() -> u64 + Send + Sync>,
         agent: A,
         id: Principal,
         balances: &'static LocalKey<RefCell<StableBalances>>,
@@ -280,3 +280,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         AuditTrail { transactions }
     }
 }
+
+#[cfg(test)]
+mod lock_tests;
