@@ -282,4 +282,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 }
 
 #[cfg(test)]
-mod lock_tests;
+mod lock_test_interleaving_should_not_pass;
+#[cfg(test)]
+mod lock_test_interleaving_should_pass;
+#[cfg(test)]
+mod lock_test_sequential_deposits;
