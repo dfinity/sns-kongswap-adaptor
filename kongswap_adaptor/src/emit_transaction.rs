@@ -20,15 +20,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     where
         R: Request + Clone + CandidType + Debug,
     {
-        let call_result = unsafe {
-            let agent = self.agent.0.get();
-            (*agent)
-                .call(canister_id, request.clone())
-                .await
-                .map_err(|error| {
-                    Error::new_call(request.method().to_string(), canister_id, error.to_string())
-                })
-        };
+        let call_result = self
+            .agent
+            .call(canister_id, request.clone())
+            .await
+            .map_err(|error| {
+                Error::new_call(request.method().to_string(), canister_id, error.to_string())
+            });
 
         let (result, function_output) = match call_result {
             Err(err) => (Err(err.clone()), Err(err)),
@@ -57,15 +55,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Self-call to ensure that the state has been committed, to prevent state roll back in case
         // of a panic that occurs before the next (meaningful) async operation. This is recommended:
         // https://internetcomputer.org/docs/building-apps/security/inter-canister-calls#journaling
-        unsafe {
-            let agent = self.agent.0.get();
-            if let Err(err) = (*agent).call(self.id, CommitStateRequest {}).await {
-                log_err(&format!(
-                    "Failed to commit state after emitting transaction: {}",
-                    err
-                ));
-            }
-        };
+        if let Err(err) = self.agent.call(self.id, CommitStateRequest {}).await {
+            log_err(&format!(
+                "Failed to commit state after emitting transaction: {}",
+                err
+            ));
+        }
 
         function_output
     }

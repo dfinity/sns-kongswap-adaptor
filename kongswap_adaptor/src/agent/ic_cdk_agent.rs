@@ -24,7 +24,7 @@ impl AbstractAgent for CdkAgent {
     type Error = CdkAgentError;
 
     async fn call<R: Request>(
-        &mut self,
+        &self,
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {

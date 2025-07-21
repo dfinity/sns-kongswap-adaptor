@@ -10,11 +10,7 @@ use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::Error;
 use sns_treasury_manager::{AuditTrail, Transaction};
-use std::{
-    cell::{RefCell, UnsafeCell},
-    sync::Arc,
-    thread::LocalKey,
-};
+use std::{cell::RefCell, sync::Arc, thread::LocalKey};
 
 pub(crate) mod storage;
 
@@ -26,21 +22,9 @@ pub const MAX_LOCK_DURATION_NS: u64 = 45 * 60 * NS_IN_SECOND; // 45 minutes
 // TODO: Ideally, we would have the name of the owner / SNS.
 const TREASURY_OWNER_NAME: &str = "DAO Treasury";
 
-pub struct UnsafeSyncCell<T>(pub UnsafeCell<T>);
-
-impl<T> UnsafeSyncCell<T> {
-    pub(crate) fn new(value: T) -> Self {
-        Self(UnsafeCell::new(value))
-    }
-}
-
-// SAFETY: You must ensure synchronization yourself!
-unsafe impl<T: Send> Sync for UnsafeSyncCell<T> {}
-unsafe impl<T: Send> Send for UnsafeSyncCell<T> {}
-
 pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
     time_ns: Box<dyn Fn() -> u64 + Send + Sync>,
-    pub agent: Arc<UnsafeSyncCell<A>>,
+    pub agent: Arc<A>,
     pub id: Principal,
     balances: &'static LocalKey<RefCell<StableBalances>>,
     audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,
@@ -49,7 +33,7 @@ pub(crate) struct KongSwapAdaptor<A: AbstractAgent> {
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn new(
         time_ns: Box<dyn Fn() -> u64 + Send + Sync>,
-        agent: Arc<UnsafeSyncCell<A>>,
+        agent: Arc<A>,
         id: Principal,
         balances: &'static LocalKey<RefCell<StableBalances>>,
         audit_trail: &'static LocalKey<RefCell<StableAuditTrail>>,

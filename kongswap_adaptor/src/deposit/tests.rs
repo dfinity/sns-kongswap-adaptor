@@ -1,7 +1,8 @@
-use candid::{CandidType, Principal};
+use candid::{CandidType, Nat, Principal};
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use icrc_ledger_types::icrc::generic_metadata_value::MetadataValue;
+use icrc_ledger_types::icrc2::approve::ApproveArgs;
 use kongswap_adaptor::agent::icrc_requests::Icrc1MetadataRequest;
 use kongswap_adaptor::{agent::Request, requests::CommitStateRequest};
 use maplit::btreemap;
@@ -10,16 +11,18 @@ use sns_treasury_manager::{
     Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
     TreasuryManagerInit,
 };
+use std::cell::UnsafeCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
 
 use super::*;
 use crate::kong_types::{
-    AddPoolReply, AddTokenArgs, AddTokenReply, ICReply, RemoveLiquidityAmountsArgs,
+    AddPoolArgs, AddPoolReply, AddTokenArgs, AddTokenReply, ICReply, RemoveLiquidityAmountsArgs,
     RemoveLiquidityAmountsReply, UpdateTokenArgs, UpdateTokenReply, UserBalanceLPReply,
     UserBalancesArgs, UserBalancesReply,
 };
-use crate::state::UnsafeSyncCell;
+use crate::KONG_BACKEND_CANISTER_ID;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
@@ -27,12 +30,58 @@ use crate::{
 use std::fmt::Debug;
 
 const E8: u64 = 100_000_000;
+const FEE_SNS: u64 = 10_500u64;
+const FEE_ICP: u64 = 9_500u64;
 
 use lazy_static::lazy_static;
 
+pub struct UnsafeSyncCell<T>(pub UnsafeCell<T>);
+
+impl<T> UnsafeSyncCell<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Self(UnsafeCell::new(value))
+    }
+}
+
+// SAFETY: You must ensure synchronization yourself!
+unsafe impl<T: Send> Sync for UnsafeSyncCell<T> {}
+unsafe impl<T: Send> Send for UnsafeSyncCell<T> {}
 lazy_static! {
     static ref SELF_CANISTER_ID: Principal =
         Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
+    static ref SNS_LEDGER: Principal = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
+    static ref ICP_LEDGER: Principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
+    static ref SNS_ID: Principal = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
+
+    static ref TOKEN_0: String = format!("IC.{}", *SNS_LEDGER);
+    static ref TOKEN_1: String = format!("IC.{}", *ICP_LEDGER);
+    // Create test assets and request first
+    static ref ASSET_0: Asset = Asset::Token {
+        ledger_canister_id: *SNS_LEDGER,
+        symbol: "DAO".to_string(),
+        ledger_fee_decimals: Nat::from(FEE_SNS),
+    };
+
+    static ref ASSET_1: Asset = Asset::Token {
+        ledger_canister_id: *ICP_LEDGER,
+        symbol: "ICP".to_string(),
+        ledger_fee_decimals: Nat::from(FEE_ICP),
+    };
+
+    static ref OWNER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: Principal::from_text("2vxsx-fae").unwrap(),
+        subaccount: None,
+    };
+
+}
+
+lazy_static! {
+    // Add fields to control mock behavior
+    static ref CURRENT_STACK: UnsafeSyncCell<usize> = UnsafeSyncCell::new(0);
+    static ref CURRENT_INSTRUCTION: UnsafeSyncCell<usize> = UnsafeSyncCell::new(0);
+    static ref CALL_STACKS: UnsafeSyncCell<HashMap<usize, VecDeque<CallSpec>>> = UnsafeSyncCell::new(HashMap::<usize, VecDeque<CallSpec>>::new());
+    // source stack id, source instruction id, destination stack id, destination instruction id
+    static ref SWITCHING_CONTEXT: UnsafeSyncCell<Option<(usize, usize, usize, usize)>> = UnsafeSyncCell(UnsafeCell::new(None));
 }
 
 #[derive(Clone, Debug)]
@@ -62,7 +111,7 @@ impl Display for MockError {
 
 impl Error for MockError {}
 
-// TODO use Result to store reply and failure
+#[derive(Clone)]
 struct CallSpec {
     raw_request: Vec<u8>,
     raw_response: Vec<u8>,
@@ -85,39 +134,45 @@ impl CallSpec {
     }
 }
 
-struct MockAgent {
-    // Add fields to control mock behavior
-    expected_calls: VecDeque<CallSpec>,
-}
+struct MockAgent {}
 
 impl MockAgent {
-    fn new() -> Self {
-        Self {
-            expected_calls: VecDeque::default(),
-        }
-    }
-
     fn add_call<Req>(
-        mut self,
+        self,
         canister_id: Principal,
         request: Req,
         response: Req::Response,
-    ) -> Self
+        stack_id: usize,
+    ) -> MockAgent
     where
         Req: Request,
     {
+        let mut calls = VecDeque::new();
+
         let call = CallSpec::new(canister_id, request, response)
             .expect("Creating a new call specification failed");
-        self.expected_calls.push_back(call);
+        calls.push_back(call);
 
         let commit_state = CallSpec::new(*SELF_CANISTER_ID, CommitStateRequest {}, ())
             .expect("CommittState call creation failed");
-        self.expected_calls.push_back(commit_state);
+        calls.push_back(commit_state);
+
+        unsafe {
+            (*CALL_STACKS.0.get())
+                .entry(stack_id)
+                .and_modify(|stack| stack.extend(calls.clone()))
+                .or_insert(calls);
+        }
+
         self
     }
 
     fn finished_calls(&self) -> bool {
-        self.expected_calls.is_empty()
+        unsafe {
+            (*CALL_STACKS.0.get())
+                .values()
+                .all(|callstack| callstack.is_empty())
+        }
     }
 }
 
@@ -125,19 +180,28 @@ impl AbstractAgent for MockAgent {
     type Error = MockError;
     // Infallable !
     async fn call<R: kongswap_adaptor::agent::Request + Debug + CandidType>(
-        &mut self,
+        &self,
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {
-        println!("started call...");
+        let current_instruction = unsafe { *CURRENT_INSTRUCTION.0.get() };
+        let current_stack = unsafe { *CURRENT_STACK.0.get() };
+        println!(
+            "started call: instruction #[{}], stack {}",
+            current_instruction, current_stack
+        );
+
         let Ok(raw_request) = request.payload() else {
             panic!("Cannot encode the request");
         };
 
-        let expected_call = self
-            .expected_calls
-            .pop_front()
-            .expect("Consumed all expected requests");
+        let expected_call = unsafe {
+            (*CALL_STACKS.0.get())
+                .get_mut(&current_stack)
+                .unwrap()
+                .pop_front()
+                .expect("Consumed all expected requests")
+        };
 
         if raw_request != expected_call.raw_request {
             println!("request: {:#?}", request);
@@ -156,6 +220,37 @@ impl AbstractAgent for MockAgent {
             .expect("Unable to decode the response");
 
         println!("successfully called canister ID: {}", canister_id);
+
+        unsafe {
+            *(CURRENT_INSTRUCTION.0.get()) += 1;
+        }
+
+        let current_instruction = unsafe { *CURRENT_INSTRUCTION.0.get() };
+        let current_stack = unsafe { *CURRENT_STACK.0.get() };
+
+        let switching_context = unsafe { *SWITCHING_CONTEXT.0.get() };
+        if let Some((
+            source_stack,
+            source_instruction,
+            destination_stack,
+            destination_instruction,
+        )) = switching_context
+        {
+            if current_stack == source_stack && current_instruction == source_instruction {
+                unsafe {
+                    *CURRENT_STACK.0.get() = destination_stack;
+                    *CURRENT_INSTRUCTION.0.get() = destination_instruction;
+                }
+                // To simulate a delay in asynchronous calls
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+                unsafe {
+                    *CURRENT_STACK.0.get() = source_stack;
+                    *CURRENT_INSTRUCTION.0.get() = source_instruction;
+                }
+            }
+        }
+
         return Ok(reply);
     }
 }
@@ -316,34 +411,197 @@ fn make_remove_liquidity_amounts_reply(
     }
 }
 
+fn add_happy_deposit_calls(
+    mock_agent: MockAgent,
+    amount_0_decimals: u64,
+    amount_1_decimals: u64,
+    stack_id: usize,
+) -> MockAgent {
+    mock_agent
+        .add_call(
+            *SNS_LEDGER,
+            make_approve_request(amount_0_decimals, FEE_SNS),
+            Ok(Nat::from(amount_0_decimals)),
+            stack_id,
+        )
+        .add_call(
+            *ICP_LEDGER,
+            make_approve_request(amount_1_decimals, FEE_ICP),
+            Ok(Nat::from(amount_1_decimals)),
+            stack_id,
+        )
+        .add_call(
+            *SNS_LEDGER,
+            make_balance_request(*SELF_CANISTER_ID),
+            Nat::from(amount_0_decimals - FEE_SNS),
+            stack_id,
+        )
+        .add_call(
+            *ICP_LEDGER,
+            make_balance_request(*SELF_CANISTER_ID),
+            Nat::from(amount_1_decimals - FEE_ICP),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_token_request(TOKEN_0.clone()),
+            Ok(make_add_token_reply(
+                1,
+                "IC".to_string(),
+                *SNS_ID,
+                "My DAO Token".to_string(),
+                "DAO".to_string(),
+                FEE_SNS,
+            )),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_token_request(TOKEN_1.clone()),
+            Ok(make_add_token_reply(
+                2,
+                "IC".to_string(),
+                *ICP_LEDGER,
+                "Internet Computer".to_string(),
+                "ICP".to_string(),
+                FEE_ICP,
+            )),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_update_token_request(TOKEN_0.clone()),
+            Ok(make_update_token_reply(
+                1,
+                "IC".to_string(),
+                *SNS_ID,
+                "My DAO Token".to_string(),
+                "DAO".to_string(),
+                FEE_SNS,
+            )),
+            stack_id,
+        )
+        .add_call(
+            *SNS_LEDGER,
+            Icrc1MetadataRequest {},
+            make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_update_token_request(TOKEN_1.clone()),
+            Ok(make_update_token_reply(
+                2,
+                "IC".to_string(),
+                *ICP_LEDGER,
+                "Internet Computer".to_string(),
+                "ICP".to_string(),
+                FEE_ICP,
+            )),
+            stack_id,
+        )
+        .add_call(
+            *ICP_LEDGER,
+            Icrc1MetadataRequest {},
+            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_pool_request(
+                TOKEN_0.clone(),
+                amount_0_decimals - 2 * FEE_SNS,
+                TOKEN_1.clone(),
+                amount_1_decimals - 2 * FEE_ICP,
+            ),
+            Ok(AddPoolReply::default()),
+            stack_id,
+        )
+        .add_call(
+            *SNS_LEDGER,
+            make_balance_request(*SELF_CANISTER_ID),
+            Nat::from(0_u64),
+            stack_id,
+        )
+        .add_call(
+            *ICP_LEDGER, // @todo
+            make_balance_request(*SELF_CANISTER_ID),
+            Nat::from(0_u64),
+            stack_id,
+        )
+        .add_call(
+            *SNS_LEDGER,
+            make_balance_request(*SELF_CANISTER_ID),
+            Nat::from(0_u64),
+            stack_id,
+        )
+        .add_call(
+            *ICP_LEDGER,
+            make_balance_request(*SELF_CANISTER_ID),
+            Nat::from(0_u64),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_update_token_request(TOKEN_0.clone()),
+            Ok(make_update_token_reply(
+                1,
+                "IC".to_string(),
+                *SNS_ID,
+                "My DAO Token".to_string(),
+                "DAO".to_string(),
+                FEE_SNS,
+            )),
+            stack_id,
+        )
+        .add_call(
+            *SNS_LEDGER,
+            Icrc1MetadataRequest {},
+            make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_update_token_request(TOKEN_1.clone()),
+            Ok(make_update_token_reply(
+                2,
+                "IC".to_string(),
+                *ICP_LEDGER,
+                "Internet Computer".to_string(),
+                "ICP".to_string(),
+                FEE_ICP,
+            )),
+            stack_id,
+        )
+        .add_call(
+            *ICP_LEDGER,
+            Icrc1MetadataRequest {},
+            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_user_balances_request(*SELF_CANISTER_ID),
+            Ok(vec![make_user_balance_reply()]),
+            stack_id,
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_remove_liquidity_amounts_request(
+                "DAO".to_string(),
+                "ICP".to_string(),
+                10000000000,
+            ),
+            Ok(make_remove_liquidity_amounts_reply(
+                amount_0_decimals - 2 * FEE_SNS,
+                amount_1_decimals - 2 * FEE_ICP,
+            )),
+            stack_id,
+        )
+}
+
 #[tokio::test]
 async fn test_deposit_success() {
-    const FEE_SNS: u64 = 10_500u64;
-    const FEE_ICP: u64 = 9_500u64;
-    let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
-    let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
-
-    let token_0 = format!("IC.{}", sns_ledger);
-    let token_1 = format!("IC.{}", icp_ledger);
-    // Create test assets and request first
-    let asset_0 = Asset::Token {
-        ledger_canister_id: sns_ledger,
-        symbol: "DAO".to_string(),
-        ledger_fee_decimals: Nat::from(FEE_SNS),
-    };
-
-    let asset_1 = Asset::Token {
-        ledger_canister_id: icp_ledger,
-        symbol: "ICP".to_string(),
-        ledger_fee_decimals: Nat::from(FEE_ICP),
-    };
-
-    let owner_account = sns_treasury_manager::Account {
-        owner: Principal::from_text("2vxsx-fae").unwrap(),
-        subaccount: None,
-    };
-
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
             RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -375,180 +633,22 @@ async fn test_deposit_success() {
     let allowances = vec![
         // SNS
         Allowance {
-            asset: asset_0.clone(),
-            owner_account,
+            asset: ASSET_0.clone(),
+            owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_0_decimals),
         },
         // ICP
         Allowance {
-            asset: asset_1.clone(),
-            owner_account,
+            asset: ASSET_1.clone(),
+            owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_1_decimals),
         },
     ];
 
-    let mock_agent = MockAgent::new()
-        .add_call(
-            sns_ledger,
-            make_approve_request(amount_0_decimals, FEE_SNS),
-            Ok(Nat::from(amount_0_decimals)),
-        )
-        .add_call(
-            icp_ledger,
-            make_approve_request(amount_1_decimals, FEE_ICP),
-            Ok(Nat::from(amount_1_decimals)),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_0_decimals - FEE_SNS),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_1_decimals - FEE_ICP),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_0.clone()),
-            Ok(make_add_token_reply(
-                1,
-                "IC".to_string(),
-                sns_id,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_1.clone()),
-            Ok(make_add_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_0.clone()),
-            Ok(make_update_token_reply(
-                1,
-                "IC".to_string(),
-                sns_id,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            sns_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_1.clone()),
-            Ok(make_update_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            icp_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_pool_request(
-                token_0.clone(),
-                amount_0_decimals - 2 * FEE_SNS,
-                token_1.clone(),
-                amount_1_decimals - 2 * FEE_ICP,
-            ),
-            Ok(AddPoolReply::default()),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger, // @todo
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_0.clone()),
-            Ok(make_update_token_reply(
-                1,
-                "IC".to_string(),
-                sns_id,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            sns_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_1.clone()),
-            Ok(make_update_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            icp_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_user_balances_request(*SELF_CANISTER_ID),
-            Ok(vec![make_user_balance_reply()]),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_remove_liquidity_amounts_request(
-                "DAO".to_string(),
-                "ICP".to_string(),
-                10000000000,
-            ),
-            Ok(make_remove_liquidity_amounts_reply(
-                amount_0_decimals - 2 * FEE_SNS,
-                amount_1_decimals - 2 * FEE_ICP,
-            )),
-        );
+    let mut mock_agent = MockAgent {};
+    mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
 
-    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
+    let mock_agent = Arc::new(mock_agent);
     let mut kong_adaptor = KongSwapAdaptor::new(
         Box::new(|| 0), // Mock time function
         Arc::clone(&mock_agent),
@@ -577,14 +677,12 @@ async fn test_deposit_success() {
     // This should now work without panicking
     let result = kong_adaptor.deposit(DepositRequest { allowances }).await;
 
-    let finished_calls = unsafe {
-        let x = kong_adaptor.agent.as_ref().0.get();
-        (*x).finished_calls()
-    };
+    let finished_calls = kong_adaptor.agent.finished_calls();
+
     assert!(finished_calls, "There are still some calls remaining");
 
     let mut asset_0_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
+        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
         .with_treasury_manager(
             sns_treasury_manager::Account {
                 owner: kong_adaptor.id,
@@ -609,7 +707,7 @@ async fn test_deposit_success() {
     });
 
     let mut asset_1_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
+        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
         .with_treasury_manager(
             sns_treasury_manager::Account {
                 owner: kong_adaptor.id,
@@ -637,8 +735,8 @@ async fn test_deposit_success() {
     let balances = Balances {
         timestamp_ns: 0,
         asset_to_balances: Some(btreemap! {
-            asset_0 => asset_0_balance,
-            asset_1 => asset_1_balance,
+            ASSET_0.clone() => asset_0_balance,
+            ASSET_1.clone() => asset_1_balance,
         }),
     };
 

@@ -11,6 +11,7 @@ use sns_treasury_manager::{
     Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
     TreasuryManagerInit,
 };
+use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::{cell::RefCell, collections::VecDeque, error::Error, fmt::Display};
@@ -34,6 +35,17 @@ const FEE_ICP: u64 = 9_500u64;
 
 use lazy_static::lazy_static;
 
+pub struct UnsafeSyncCell<T>(pub UnsafeCell<T>);
+
+impl<T> UnsafeSyncCell<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Self(UnsafeCell::new(value))
+    }
+}
+
+// SAFETY: You must ensure synchronization yourself!
+unsafe impl<T: Send> Sync for UnsafeSyncCell<T> {}
+unsafe impl<T: Send> Send for UnsafeSyncCell<T> {}
 lazy_static! {
     static ref SELF_CANISTER_ID: Principal =
         Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
@@ -61,6 +73,15 @@ lazy_static! {
         subaccount: None,
     };
 
+}
+
+lazy_static! {
+    // Add fields to control mock behavior
+    static ref CURRENT_STACK: UnsafeSyncCell<usize> = UnsafeSyncCell::new(0);
+    static ref CURRENT_INSTRUCTION: UnsafeSyncCell<usize> = UnsafeSyncCell::new(0);
+    static ref CALL_STACKS: UnsafeSyncCell<HashMap<usize, VecDeque<CallSpec>>> = UnsafeSyncCell::new(HashMap::<usize, VecDeque<CallSpec>>::new());
+    // source stack id, source instruction id, destination stack id, destination instruction id
+    static ref SWITCHING_CONTEXT: UnsafeSyncCell<Option<(usize, usize, usize, usize)>> = UnsafeSyncCell(UnsafeCell::new(None));
 }
 
 #[derive(Clone, Debug)]
@@ -129,32 +150,16 @@ impl MockClock {
     }
 }
 
-struct MockAgent {
-    // Add fields to control mock behavior
-    current_stack: usize,
-    current_instruction: usize,
-    calls_stacks: HashMap<usize, VecDeque<CallSpec>>,
-    // source stack id, source instruction id, destination stack id, destination instruction id
-    switching_context: Option<(usize, usize, usize, usize)>,
-}
+struct MockAgent {}
 
 impl MockAgent {
-    fn new(switching_context: Option<(usize, usize, usize, usize)>) -> Self {
-        Self {
-            current_stack: 0,
-            current_instruction: 0,
-            calls_stacks: HashMap::<usize, VecDeque<CallSpec>>::default(),
-            switching_context,
-        }
-    }
-
     fn add_call<Req>(
-        mut self,
+        self,
         canister_id: Principal,
         request: Req,
         response: Req::Response,
         stack_id: usize,
-    ) -> Self
+    ) -> MockAgent
     where
         Req: Request,
     {
@@ -168,26 +173,32 @@ impl MockAgent {
             .expect("CommittState call creation failed");
         calls.push_back(commit_state);
 
-        self.calls_stacks
-            .entry(stack_id)
-            .and_modify(|stack| stack.extend(calls.clone()))
-            .or_insert(calls);
+        unsafe {
+            (*CALL_STACKS.0.get())
+                .entry(stack_id)
+                .and_modify(|stack| stack.extend(calls.clone()))
+                .or_insert(calls);
+        }
 
         self
     }
 
-    fn context_finished_calls(&self, stack_id: usize) -> bool {
-        self.calls_stacks[&stack_id].is_empty()
+    fn context_finished_calls(stack_id: usize) -> bool {
+        unsafe { (*CALL_STACKS.0.get())[&stack_id].is_empty() }
     }
 
     fn finished_calls(&self) -> bool {
-        self.calls_stacks
-            .values()
-            .all(|callstack| callstack.is_empty())
+        unsafe {
+            (*CALL_STACKS.0.get())
+                .values()
+                .all(|callstack| callstack.is_empty())
+        }
     }
 
-    fn context_switch(&mut self, next_stack_id: usize) {
-        self.current_stack = next_stack_id
+    fn context_switch(next_stack_id: usize) {
+        unsafe {
+            (*CURRENT_STACK.0.get()) = next_stack_id;
+        }
     }
 }
 
@@ -195,25 +206,28 @@ impl AbstractAgent for MockAgent {
     type Error = MockError;
     // Infallable !
     async fn call<R: kongswap_adaptor::agent::Request + Debug + CandidType>(
-        &mut self,
+        &self,
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {
+        let current_instruction = unsafe { *CURRENT_INSTRUCTION.0.get() };
+        let current_stack = unsafe { *CURRENT_STACK.0.get() };
         println!(
             "started call: instruction #[{}], stack {}",
-            self.current_instruction, self.current_stack
+            current_instruction, current_stack
         );
 
         let Ok(raw_request) = request.payload() else {
             panic!("Cannot encode the request");
         };
 
-        let expected_call = self
-            .calls_stacks
-            .get_mut(&self.current_stack)
-            .unwrap()
-            .pop_front()
-            .expect("Consumed all expected requests");
+        let expected_call = unsafe {
+            (*CALL_STACKS.0.get())
+                .get_mut(&current_stack)
+                .unwrap()
+                .pop_front()
+                .expect("Consumed all expected requests")
+        };
 
         if raw_request != expected_call.raw_request {
             println!("request: {:#?}", request);
@@ -233,25 +247,33 @@ impl AbstractAgent for MockAgent {
 
         println!("successfully called canister ID: {}", canister_id);
 
-        self.current_instruction += 1;
+        unsafe {
+            *(CURRENT_INSTRUCTION.0.get()) += 1;
+        }
 
+        let current_instruction = unsafe { *CURRENT_INSTRUCTION.0.get() };
+        let current_stack = unsafe { *CURRENT_STACK.0.get() };
+
+        let switching_context = unsafe { *SWITCHING_CONTEXT.0.get() };
         if let Some((
             source_stack,
             source_instruction,
             destination_stack,
             destination_instruction,
-        )) = self.switching_context
+        )) = switching_context
         {
-            if self.current_stack == source_stack && self.current_instruction == source_instruction
-            {
-                self.current_stack = destination_stack;
-                self.current_instruction = destination_instruction;
-
+            if current_stack == source_stack && current_instruction == source_instruction {
+                unsafe {
+                    *CURRENT_STACK.0.get() = destination_stack;
+                    *CURRENT_INSTRUCTION.0.get() = destination_instruction;
+                }
                 // To simulate a delay in asynchronous calls
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
-                self.current_stack = source_stack;
-                self.current_instruction = source_instruction;
+                unsafe {
+                    *CURRENT_STACK.0.get() = source_stack;
+                    *CURRENT_INSTRUCTION.0.get() = source_instruction;
+                }
             }
         }
 
@@ -652,13 +674,13 @@ async fn test_lock_sequential_deposits() {
         },
     ];
 
-    let mut mock_agent = MockAgent::new(None);
+    let mut mock_agent = MockAgent {};
     // We have two sequences of deposits.
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 1);
 
     let mock_clock = MockClock::default();
-    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
+    let mock_agent = Arc::new(mock_agent);
 
     let mut kong_adaptor = KongSwapAdaptor::new(
         mock_clock.get_timer(),
@@ -669,7 +691,7 @@ async fn test_lock_sequential_deposits() {
     );
 
     unsafe {
-        println!("stack id: {}", (*mock_agent.0.get()).current_stack);
+        println!("stack id: {}", *CURRENT_STACK.0.get());
     }
 
     let init = TreasuryManagerInit {
@@ -756,25 +778,19 @@ async fn test_lock_sequential_deposits() {
     };
 
     assert_eq!(result, Ok(balances));
-    unsafe {
-        assert!(
-            (*mock_agent.0.get()).context_finished_calls(0),
-            "Not all calls from context 0 are used"
-        );
-    };
+    assert!(
+        MockAgent::context_finished_calls(0),
+        "Not all calls from context 0 are used"
+    );
 
-    unsafe {
-        (*mock_agent.0.get()).context_switch(1);
-    }
+    MockAgent::context_switch(1);
 
     let _ = kong_adaptor.deposit(DepositRequest { allowances }).await;
 
-    unsafe {
-        assert!(
-            (*mock_agent.0.get()).finished_calls(),
-            "There are still some calls remaining"
-        );
-    }
+    assert!(
+        (*mock_agent).finished_calls(),
+        "There are still some calls remaining"
+    );
 }
 
 // This test models the scenario, in which the second deposit call
@@ -824,16 +840,19 @@ async fn test_lock_interleaving_should_not_pass() {
         },
     ];
 
+    unsafe {
+        (*SWITCHING_CONTEXT.0.get()) = Some((0, 2, 1, 0));
+    }
     // Upon reaching the instruction id 1, we switch to the beginning of
     // the stack id 1.
-    let mut mock_agent = MockAgent::new(Some((0, 2, 1, 0)));
+    let mut mock_agent = MockAgent {};
 
     // We have two sequences of deposits.
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 1);
 
     let mock_clock = MockClock::default();
-    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
+    let mock_agent = Arc::new(mock_agent);
 
     let kong_adaptor = KongSwapAdaptor::new(
         mock_clock.get_timer(),
@@ -958,16 +977,19 @@ async fn test_lock_interleaving_should_pass() {
         },
     ];
 
+    unsafe {
+        (*SWITCHING_CONTEXT.0.get()) = Some((0, 2, 1, 0));
+    }
     // Upon reaching the instruction id 1, we switch to the beginning of
     // the stack id 1.
-    let mut mock_agent = MockAgent::new(Some((0, 2, 1, 0)));
+    let mut mock_agent = MockAgent {};
 
     // We have two sequences of deposits.
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
     mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 1);
 
     let mut mock_clock = MockClock::default();
-    let mock_agent = Arc::new(UnsafeSyncCell::new(mock_agent));
+    let mock_agent = Arc::new(mock_agent);
 
     let kong_adaptor = KongSwapAdaptor::new(
         mock_clock.get_timer(),

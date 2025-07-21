@@ -41,7 +41,7 @@ impl AbstractAgent for PocketIcAgent {
     type Error = PocketIcCallError;
 
     async fn call<R: Request>(
-        &mut self,
+        &self,
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {
