@@ -55,16 +55,20 @@ lazy_static! {
 
     static ref TOKEN_0: String = format!("IC.{}", *SNS_LEDGER);
     static ref TOKEN_1: String = format!("IC.{}", *ICP_LEDGER);
+
+    static ref TOKEN_0_SYMBOL: String = "DAO".to_string();
+    static ref TOKEN_1_SYMBOL: String = "ICP".to_string();
+
     // Create test assets and request first
     static ref ASSET_0: Asset = Asset::Token {
         ledger_canister_id: *SNS_LEDGER,
-        symbol: "DAO".to_string(),
+        symbol: (*TOKEN_0_SYMBOL).to_string(),
         ledger_fee_decimals: Nat::from(FEE_SNS),
     };
 
     static ref ASSET_1: Asset = Asset::Token {
         ledger_canister_id: *ICP_LEDGER,
-        symbol: "ICP".to_string(),
+        symbol: (*TOKEN_1_SYMBOL).to_string(),
         ledger_fee_decimals: Nat::from(FEE_ICP),
     };
 
@@ -411,7 +415,7 @@ fn make_remove_liquidity_amounts_reply(
     }
 }
 
-fn add_happy_deposit_calls(
+fn add_pool_deposit_calls(
     mock_agent: MockAgent,
     amount_0_decimals: u64,
     amount_1_decimals: u64,
@@ -601,7 +605,7 @@ fn add_happy_deposit_calls(
 }
 
 #[tokio::test]
-async fn test_deposit_success() {
+async fn test_add_pool_deposit() {
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
             RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -646,7 +650,7 @@ async fn test_deposit_success() {
     ];
 
     let mut mock_agent = MockAgent {};
-    mock_agent = add_happy_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
+    mock_agent = add_pool_deposit_calls(mock_agent, amount_0_decimals, amount_1_decimals, 0);
 
     let mock_agent = Arc::new(mock_agent);
     let mut kong_adaptor = KongSwapAdaptor::new(
