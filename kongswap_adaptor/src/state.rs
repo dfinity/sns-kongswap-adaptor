@@ -8,8 +8,8 @@ use crate::{
 use candid::Principal;
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
-use sns_treasury_manager::Error;
 use sns_treasury_manager::{AuditTrail, Transaction};
+use sns_treasury_manager::{Error, Operation, TreasuryManagerOperation};
 use std::{cell::RefCell, thread::LocalKey};
 
 pub(crate) mod storage;
@@ -222,11 +222,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub fn finalize_audit_trail_transaction(&self, context: OperationContext) {
-        let last_entry = self.with_audit_trail_mut(|audit_trail| audit_trail.pop());
+        let last_entry = self.with_audit_trail_mut(|audit_trail| {
+            audit_trail
+                .iter()
+                .rev()
+                .find(|transaction| transaction.operation.operation == context.operation)
+        });
 
         let Some(mut last_entry) = last_entry else {
             log_err(&format!(
-                "Audit trail is empty despite the operation beign successfully completed. \
+                "Audit trail is empty despite the operation being successfully completed. \
                      Operation context: {:?}",
                 context,
             ));
@@ -241,8 +246,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
         let now_ns = self.time_ns();
 
+        fn is_locking_transaction(treasury_manager_operation: &TreasuryManagerOperation) -> bool {
+            [Operation::Deposit, Operation::Withdraw]
+                .contains(&treasury_manager_operation.operation)
+        }
+
         let AuditTrail { transactions } = self.get_audit_trail();
-        let Some(transaction) = transactions.last() else {
+        let Some(transaction) = transactions
+            .iter()
+            .rev()
+            .find(|transaction| is_locking_transaction(&transaction.treasury_manager_operation))
+        else {
             return None;
         };
 

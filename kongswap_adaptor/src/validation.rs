@@ -205,7 +205,7 @@ impl TryFrom<TreasuryManagerInit> for ValidatedTreasuryManagerInit {
     }
 }
 
-#[derive(CandidType, Clone, Copy, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(CandidType, Clone, Copy, Debug, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum ValidatedAsset {
     Token {
         symbol: ValidatedSymbol,

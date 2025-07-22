@@ -17,7 +17,7 @@ pub fn serialize_audit_trail(
 #[must_use]
 #[derive(Debug)]
 pub struct OperationContext {
-    operation: Operation,
+    pub operation: Operation,
 
     /// None indicates that there were no calls yet.
     index: Option<usize>,

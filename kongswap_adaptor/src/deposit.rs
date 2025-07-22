@@ -12,10 +12,6 @@ use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::{Error, ErrorKind};
 
-/// How many ledger transaction that incur fees are required for a deposit operation (per token).
-/// This is an implementation detail of KongSwap and ICRC1 ledgers.
-const DEPOSIT_LEDGER_FEES_PER_TOKEN: u64 = 2;
-
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Enforces that each KongSwapAdaptor instance manages a single token pair.
     pub(crate) fn validate_deposit_args(
@@ -43,57 +39,73 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
+    async fn set_dex_allowances_impl(
+        &mut self,
+        context: &mut OperationContext,
+        allowance: ValidatedAllowance,
+    ) -> Result<u64, Error> {
+        let ValidatedAllowance {
+            asset,
+            amount_decimals,
+            owner_account: _,
+        } = allowance;
+
+        let human_readable = format!(
+            "Calling ICRC2 approve to set KongSwapBackend as spender for {}.",
+            asset.symbol()
+        );
+
+        let canister_id = asset.ledger_canister_id();
+        let fee_decimals = asset.ledger_fee_decimals();
+
+        let approved_amount_decimals = amount_decimals - fee_decimals;
+        let amount = Nat::from(approved_amount_decimals);
+
+        let fee_decimals = Nat::from(fee_decimals);
+        let fee = Some(fee_decimals.clone());
+
+        let request = ApproveArgs {
+            from_subaccount: None,
+            spender: Account {
+                owner: *KONG_BACKEND_CANISTER_ID,
+                subaccount: None,
+            },
+            // All approved tokens should be fully used up before the next deposit.
+            amount,
+            expected_allowance: Some(Nat::from(0u8)),
+            // TODO: Choose a more concervative expiration date.
+            expires_at: Some(u64::MAX),
+            memo: None,
+            created_at_time: None,
+            fee,
+        };
+
+        // Fail early if at least one of the allowances fails.
+        self.emit_transaction(
+            context.next_operation(),
+            canister_id,
+            request,
+            human_readable,
+        )
+        .await?;
+
+        // Charge approval fees
+        self.charge_fee(asset);
+
+        Ok(approved_amount_decimals)
+    }
+
     /// Set up the allowances for the KongSwapBackend canister.
     async fn set_dex_allowances(
         &mut self,
         context: &mut OperationContext,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<(), Error> {
-        for ValidatedAllowance {
-            asset,
-            amount_decimals,
-            owner_account: _,
-        } in [&allowance_0, &allowance_1]
-        {
-            let human_readable = format!(
-                "Calling ICRC2 approve to set KongSwapBackend as spender for {}.",
-                asset.symbol()
-            );
-            let canister_id = asset.ledger_canister_id();
-            let fee_decimals = Nat::from(asset.ledger_fee_decimals());
-            let fee = Some(fee_decimals.clone());
-            let amount = Nat::from(amount_decimals.clone()) - fee_decimals;
-            let request = ApproveArgs {
-                from_subaccount: None,
-                spender: Account {
-                    owner: *KONG_BACKEND_CANISTER_ID,
-                    subaccount: None,
-                },
-                // All approved tokens should be fully used up before the next deposit.
-                amount,
-                expected_allowance: Some(Nat::from(0u8)),
-                // TODO: Choose a more concervative expiration date.
-                expires_at: Some(u64::MAX),
-                memo: None,
-                created_at_time: None,
-                fee,
-            };
+    ) -> Result<(u64, u64), Error> {
+        let approved_amount_decimals_0 = self.set_dex_allowances_impl(context, allowance_0).await?;
+        let approved_amount_decimals_1 = self.set_dex_allowances_impl(context, allowance_1).await?;
 
-            // Fail early if at least one of the allowances fails.
-            self.emit_transaction(
-                context.next_operation(),
-                canister_id,
-                request,
-                human_readable,
-            )
-            .await?;
-
-            // Charge approval fees
-            self.charge_fee(*asset);
-        }
-
-        Ok(())
+        Ok((approved_amount_decimals_0, approved_amount_decimals_1))
     }
 
     async fn topup_pool(
@@ -105,14 +117,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
-        // Adjust the amounts to reflect that `DEPOSIT_LEDGER_FEES_PER_TOKEN` transactions
-        // (per token) are required for adding liquidity.
-        //
-        // The call to `validate_allowances` above ensures that the amounts are still
-        // sufficiently large.
-        let amount_0 = saturating_sub(
-            Nat::from(allowance_0.amount_decimals),
-            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_0.asset.ledger_fee_decimals(),
+        let amount_0 = Nat::from(
+            allowance_0
+                .amount_decimals
+                .saturating_sub(allowance_0.asset.ledger_fee_decimals()),
         );
         // amount_1 is a function of amount_0.
 
@@ -186,15 +194,20 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn deposit_into_dex(
         &mut self,
         context: &mut OperationContext,
-        allowance_0: ValidatedAllowance,
-        allowance_1: ValidatedAllowance,
+        mut allowance_0: ValidatedAllowance,
+        mut allowance_1: ValidatedAllowance,
     ) -> Result<(), Vec<Error>> {
-        self.set_dex_allowances(context, allowance_0, allowance_1)
+        let (approved_amount_decimals_0, approved_amount_decimals_1) = self
+            .set_dex_allowances(context, allowance_0, allowance_1)
             .await
             .map_err(|err| vec![err])?;
 
-        let mut amount_0 = Nat::from(allowance_0.amount_decimals);
-        let mut amount_1 = Nat::from(allowance_1.amount_decimals);
+        let mut amount_0 = Nat::from(approved_amount_decimals_0);
+        let mut amount_1 = Nat::from(approved_amount_decimals_1);
+
+        allowance_0.amount_decimals = approved_amount_decimals_0;
+        allowance_1.amount_decimals = approved_amount_decimals_1;
+
         let balances_before = self.get_ledger_balances(context).await?;
 
         let result = self.add_pool(context, allowance_0, allowance_1).await;
@@ -273,18 +286,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
-        // Adjust the amounts to reflect that `DEPOSIT_LEDGER_FEES_PER_TOKEN` transactions
-        // (per token) are required for adding liquidity.
-        //
-        // The call to `validate_allowances` above ensures that the amounts are still
-        // sufficiently large.
-        let amount_0 = saturating_sub(
-            Nat::from(allowance_0.amount_decimals),
-            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_0.asset.ledger_fee_decimals(),
+        // Adjust the amounts to take the fees into account.
+        let amount_0 = Nat::from(
+            allowance_0
+                .amount_decimals
+                .saturating_sub(allowance_0.asset.ledger_fee_decimals()),
         );
-        let amount_1 = saturating_sub(
-            Nat::from(allowance_1.amount_decimals),
-            Nat::from(DEPOSIT_LEDGER_FEES_PER_TOKEN) * allowance_1.asset.ledger_fee_decimals(),
+        let amount_1 = Nat::from(
+            allowance_1
+                .amount_decimals
+                .saturating_sub(allowance_1.asset.ledger_fee_decimals()),
         );
         // Step 1. Ensure the tokens are registered with the DEX.
         // Notes on why we first add SNS and then ICP:
@@ -293,10 +304,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // https://github.com/KongSwap/kong/blob/fe-predictions-update/src/kong_lib/src/ic/icp.rs#L1
         self.maybe_add_token(context, ledger_0).await?;
         self.maybe_add_token(context, ledger_1).await?;
-
-        // Step 2. Fetch the latest ledger metadata, including symbols and ledger fees.
-        // TODO: We could tolerate an error here and try to move forward.
-        self.refresh_ledger_metadata(context).await?;
 
         // Step 3. Ensure the pool exists.
 
@@ -324,7 +331,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
-    // TODO refersh balances
     pub async fn deposit_impl(
         &mut self,
         context: &mut OperationContext,
