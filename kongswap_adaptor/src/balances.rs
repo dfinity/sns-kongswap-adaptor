@@ -259,6 +259,7 @@ impl ValidatedBalances {
         };
 
         let fee = asset.ledger_fee_decimals();
+        balance_book.treasury_manager.amount_decimals -= fee;
         balance_book.fee_collector += fee;
     }
 

@@ -193,8 +193,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
-        let mut amount_0 = Nat::from(allowance_0.amount_decimals);
-        let mut amount_1 = Nat::from(allowance_1.amount_decimals);
+        let mut amount_0 =
+            Nat::from(allowance_0.amount_decimals - allowance_0.asset.ledger_fee_decimals());
+        let mut amount_1 =
+            Nat::from(allowance_1.amount_decimals - allowance_1.asset.ledger_fee_decimals());
+
         let balances_before = self.get_ledger_balances(context).await?;
 
         let result = self.add_pool(context, allowance_0, allowance_1).await;
@@ -207,10 +210,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         {
             if self.is_pool_already_deployed_error(message) {
                 // If the pool already exists, we can proceed with a top-up.
-                (amount_0, amount_1) = self
+                let (amount_0_pool_received, amount_1_pool_received) = self
                     .topup_pool(context, allowance_0, allowance_1)
                     .await
                     .map_err(|err| vec![err])?;
+
+                amount_0 = amount_0_pool_received + allowance_0.asset.ledger_fee_decimals();
+                amount_1 = amount_1_pool_received + allowance_1.asset.ledger_fee_decimals();
             }
         }
 
@@ -360,5 +366,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 }
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod deposit_add_pool;
+
+#[cfg(test)]
+mod deposit_add_liquidity;
