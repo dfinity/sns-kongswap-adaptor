@@ -360,5 +360,5 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 }
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
