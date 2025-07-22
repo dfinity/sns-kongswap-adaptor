@@ -430,40 +430,6 @@ async fn test_deposit_success() {
                 FEE_ICP,
             )),
         )
-        // .add_call(
-        //     *KONG_BACKEND_CANISTER_ID,
-        //     make_update_token_request(token_0.clone()),
-        //     Ok(make_update_token_reply(
-        //         1,
-        //         "IC".to_string(),
-        //         sns_id,
-        //         "My DAO Token".to_string(),
-        //         "DAO".to_string(),
-        //         FEE_SNS,
-        //     )),
-        // )
-        // .add_call(
-        //     sns_ledger,
-        //     Icrc1MetadataRequest {},
-        //     make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
-        // )
-        // .add_call(
-        //     *KONG_BACKEND_CANISTER_ID,
-        //     make_update_token_request(token_1.clone()),
-        //     Ok(make_update_token_reply(
-        //         2,
-        //         "IC".to_string(),
-        //         icp_ledger,
-        //         "Internet Computer".to_string(),
-        //         "ICP".to_string(),
-        //         FEE_ICP,
-        //     )),
-        // )
-        // .add_call(
-        //     icp_ledger,
-        //     Icrc1MetadataRequest {},
-        //     make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
-        // )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_pool_request(

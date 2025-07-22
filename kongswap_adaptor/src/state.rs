@@ -202,6 +202,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         });
     }
 
+    fn with_audit_trail<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&StableAuditTrail) -> R,
+    {
+        self.audit_trail.with_borrow(|audit_trail| f(audit_trail))
+    }
+
     fn with_audit_trail_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut StableAuditTrail) -> R,
@@ -221,26 +228,49 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         });
     }
 
+    // TODO: add tests
     pub fn finalize_audit_trail_transaction(&self, context: OperationContext) {
-        let last_entry = self.with_audit_trail_mut(|audit_trail| {
+        let index_value = self.with_audit_trail(|audit_trail| {
+            let num_transactions = audit_trail.len();
             audit_trail
                 .iter()
                 .rev()
-                .find(|transaction| transaction.operation.operation == context.operation)
+                .enumerate()
+                .find_map(|(rev_index, transaction)| {
+                    let transaction_operation = transaction.operation;
+
+                    if transaction_operation.operation == context.operation
+                        && !transaction_operation.step.is_final
+                    {
+                        let rev_index = rev_index as u64;
+                        let index = num_transactions.saturating_sub(1).saturating_sub(rev_index);
+
+                        Some((index, transaction.clone()))
+                    } else {
+                        None
+                    }
+                })
         });
 
-        let Some(mut last_entry) = last_entry else {
+        let Some(index_value) = index_value else {
             log_err(&format!(
-                "Audit trail is empty despite the operation being successfully completed. \
+                "Audit trail does not have an {} operation that could be finalized. \
                      Operation context: {:?}",
+                context.operation.name(),
                 context,
             ));
             return;
         };
 
-        last_entry.operation.step.is_final = true;
+        let (index, mut value) = index_value;
 
-        self.push_audit_trail_transaction(last_entry);
+        value.operation.step.is_final = true;
+
+        self.with_audit_trail_mut(|audit_trail| {
+            if index < audit_trail.len() {
+                audit_trail.set(index, &value);
+            }
+        });
     }
 
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
