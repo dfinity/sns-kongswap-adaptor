@@ -430,40 +430,40 @@ async fn test_deposit_success() {
                 FEE_ICP,
             )),
         )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_0.clone()),
-            Ok(make_update_token_reply(
-                1,
-                "IC".to_string(),
-                sns_id,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            sns_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_1.clone()),
-            Ok(make_update_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            icp_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
-        )
+        // .add_call(
+        //     *KONG_BACKEND_CANISTER_ID,
+        //     make_update_token_request(token_0.clone()),
+        //     Ok(make_update_token_reply(
+        //         1,
+        //         "IC".to_string(),
+        //         sns_id,
+        //         "My DAO Token".to_string(),
+        //         "DAO".to_string(),
+        //         FEE_SNS,
+        //     )),
+        // )
+        // .add_call(
+        //     sns_ledger,
+        //     Icrc1MetadataRequest {},
+        //     make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
+        // )
+        // .add_call(
+        //     *KONG_BACKEND_CANISTER_ID,
+        //     make_update_token_request(token_1.clone()),
+        //     Ok(make_update_token_reply(
+        //         2,
+        //         "IC".to_string(),
+        //         icp_ledger,
+        //         "Internet Computer".to_string(),
+        //         "ICP".to_string(),
+        //         FEE_ICP,
+        //     )),
+        // )
+        // .add_call(
+        //     icp_ledger,
+        //     Icrc1MetadataRequest {},
+        //     make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
+        // )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_pool_request(
@@ -493,57 +493,6 @@ async fn test_deposit_success() {
             icp_ledger,
             make_balance_request(*SELF_CANISTER_ID),
             Nat::from(0_u64),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_0.clone()),
-            Ok(make_update_token_reply(
-                1,
-                "IC".to_string(),
-                sns_id,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            sns_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("My DAO Token".to_string(), "DAO".to_string(), FEE_SNS),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_update_token_request(token_1.clone()),
-            Ok(make_update_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            icp_ledger,
-            Icrc1MetadataRequest {},
-            make_metadata_reply("Internet Computer".to_string(), "ICP".to_string(), FEE_ICP),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_user_balances_request(*SELF_CANISTER_ID),
-            Ok(vec![make_user_balance_reply()]),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_remove_liquidity_amounts_request(
-                "DAO".to_string(),
-                "ICP".to_string(),
-                10000000000,
-            ),
-            Ok(make_remove_liquidity_amounts_reply(
-                amount_0_decimals - 2 * FEE_SNS,
-                amount_1_decimals - 2 * FEE_ICP,
-            )),
         );
 
     let mut kong_adaptor = KongSwapAdaptor::new(

@@ -188,10 +188,15 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     async fn refresh_balances(&mut self) {
-        if let Err(err) = self.check_state_lock() {
-            log_err(&format!("Cannot refresh balances: {:?}", err));
-            return;
-        }
+        // This operation _can_ and _should_ be lock-free.
+        //
+        // I. It should be lock free, as periodic tasks should not block deposits and withdrawals.
+        // II. It can be lock free, as it does not interfere with any other operations in a bad way.
+        //
+        // This is how this operation modifies the state:
+        // 0. It appends to the audit_trail.
+        // 1. It is the sole operation that modifies the external_custodian balances.
+        // 2. It does not modify any other part of the state.
 
         let mut context = OperationContext::new(Operation::Balances);
 
@@ -205,16 +210,30 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     }
 
     async fn issue_rewards(&mut self) {
-        if let Err(err) = self.check_state_lock() {
-            log_err(&format!("Cannot issue rewards: {:?}", err));
-            return;
-        }
+        // This operation _can_ and _should_ be lock-free.
+        //
+        // I. It should be lock free, as periodic tasks should not block deposits and withdrawals.
+        //    (If in the future issuing rewards would change the balances, this operation should
+        //     probably be made blocking).
+        // II. It can be lock free, as it does not interfere with any other operations in a bad way.
+        //
+        // This is how this operation modifies the state:
+        // 0. It appends to the audit_trail.
+        // 1. It is the sole operation that modifies the metadata of managed assets.
+        // 2. It also modifies the balances of the following parties:
+        //    - (Incrementing) Treasury owner balance.
+        //    - (Decrementing) Treasury manager balance.
+        //    - (Increment) fee collector balance.
+        //    The order in which these increments and decrements happen is not very important,
+        //    and thus it is okay that this order is not enforced by the code.
 
         let mut context = OperationContext::new(Operation::IssueReward);
 
-        let result = self.issue_rewards_impl(&mut context).await;
+        if let Err(err) = self.refresh_ledger_metadata(&mut context).await {
+            log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
+        }
 
-        if let Err(err) = result {
+        if let Err(err) = self.issue_rewards_impl(&mut context).await {
             log_err(&format!("issue_rewards failed: {:?}", err));
         }
 
@@ -259,9 +278,20 @@ async fn run_periodic_tasks() {
 
     let mut kong_adaptor = canister_state();
 
-    kong_adaptor.refresh_balances().await;
+    // Now
+    // 1. Refresh ledger metadata
+    // 2. Issue rewards
+    // 3. Refresh balances
+
+    // Before
+    // 1. Refresh balances
+    //    - Refresh ledger metadata
+    // 2. Issue rewards
+    //   - Refresh balances
 
     kong_adaptor.issue_rewards().await;
+
+    kong_adaptor.refresh_balances().await;
 }
 
 fn init_periodic_tasks() {

@@ -57,7 +57,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // TODO: These calls could be parallelized.
         let balance_0_decimals = self.get_ledger_balance_decimals(context, asset_0).await;
-
         let balance_1_decimals = self.get_ledger_balance_decimals(context, asset_1).await;
 
         match (balance_0_decimals, balance_1_decimals) {
@@ -65,6 +64,51 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             (Err(err), Ok(_)) | (Ok(_), Err(err)) => Err(vec![err]),
             (Err(err_1), Err(err_2)) => Err(vec![err_1, err_2]),
         }
+    }
+
+    async fn return_remaining_assets_to_owner_impl(
+        &mut self,
+        context: &mut OperationContext,
+        asset: ValidatedAsset,
+        amount_decimals: u64,
+        withdraw_account: Account,
+    ) -> Result<(), Error> {
+        if amount_decimals == 0 {
+            return Ok(());
+        }
+
+        let ledger_canister_id = asset.ledger_canister_id();
+
+        let human_readable = format!(
+            "Calling {}.icrc1_transfer to return {} {} from KongSwapAdaptor to {}.",
+            ledger_canister_id,
+            amount_decimals,
+            asset.symbol(),
+            withdraw_account,
+        );
+
+        let operation = context.next_operation();
+
+        let request = TransferArg {
+            from_subaccount: None,
+            to: withdraw_account,
+            fee: Some(Nat::from(asset.ledger_fee_decimals())),
+            created_at_time: Some(self.time_ns()),
+            memo: Some(Memo::from(Vec::<u8>::from(operation))),
+            amount: Nat::from(amount_decimals),
+        };
+
+        self.emit_transaction(operation, ledger_canister_id, request, human_readable)
+            .await?;
+
+        self.move_asset(
+            asset,
+            amount_decimals,
+            Party::TreasuryManager,
+            Party::TreasuryOwner,
+        );
+
+        Ok(())
     }
 
     pub(crate) async fn return_remaining_assets_to_owner(
@@ -96,55 +140,23 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             (asset_0, return_amount_0_decimals, withdraw_account_0),
             (asset_1, return_amount_1_decimals, withdraw_account_1),
         ] {
-            if amount_decimals == 0 {
-                continue;
-            }
-
-            let ledger_canister_id = asset.ledger_canister_id();
-
-            let human_readable = format!(
-                "Calling {}.icrc1_transfer to return {} {} from KongSwapAdaptor to {}.",
-                ledger_canister_id,
-                amount_decimals,
-                asset.symbol(),
-                withdraw_account,
-            );
-
-            let operation = context.next_operation();
-
-            let request = TransferArg {
-                from_subaccount: None,
-                to: withdraw_account,
-                fee: Some(Nat::from(asset.ledger_fee_decimals())),
-                created_at_time: Some(self.time_ns()),
-                memo: Some(Memo::from(Vec::<u8>::from(operation))),
-                amount: Nat::from(amount_decimals),
-            };
-
             let result = self
-                .emit_transaction(operation, ledger_canister_id, request, human_readable)
+                .return_remaining_assets_to_owner_impl(
+                    context,
+                    asset,
+                    amount_decimals,
+                    withdraw_account,
+                )
                 .await;
 
-            match result {
-                Ok(_) => {
-                    self.move_asset(
-                        asset,
-                        amount_decimals,
-                        Party::TreasuryManager,
-                        Party::TreasuryOwner,
-                    );
-                }
-                Err(err) => withdraw_errors.push(err),
+            if let Err(err) = result {
+                withdraw_errors.push(err);
             }
         }
 
         if !withdraw_errors.is_empty() {
             return Err(withdraw_errors);
         }
-
-        self.refresh_balances_impl(context)
-            .await
-            .map_err(|err| vec![err])?;
 
         Ok(())
     }

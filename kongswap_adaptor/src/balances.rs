@@ -260,6 +260,7 @@ impl ValidatedBalances {
 
         let fee = asset.ledger_fee_decimals();
         balance_book.fee_collector += fee;
+        balance_book.treasury_manager.amount_decimals -= fee;
     }
 
     pub(crate) fn find_deposit_discrepency(
@@ -316,6 +317,125 @@ impl ValidatedBalances {
 }
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
+    async fn refresh_ledger_metadata_impl(
+        &mut self,
+        context: &mut OperationContext,
+        asset_id: usize,
+        mut asset: ValidatedAsset,
+    ) -> Result<ValidatedAsset, Error> {
+        let ledger_canister_id = asset.ledger_canister_id();
+        let old_asset = asset.clone();
+
+        // Phase I. Tell KongSwap to refresh.
+        {
+            let human_readable = format!(
+                "Calling KongSwapBackend.update_token for ledger #{} ({}).",
+                asset_id, ledger_canister_id,
+            );
+
+            let token = format!("IC.{}", ledger_canister_id);
+
+            let result = self
+                .emit_transaction(
+                    context.next_operation(),
+                    *KONG_BACKEND_CANISTER_ID,
+                    UpdateTokenArgs { token },
+                    human_readable,
+                )
+                .await;
+
+            if let Err(err) = result {
+                log_err(&format!(
+                    "Error while updating KongSwap token for ledger #{} ({}): {:?}",
+                    asset_id, ledger_canister_id, err,
+                ));
+            };
+        }
+
+        // Phase II. Refresh the localy stored metadata.
+        let human_readable = format!(
+            "Refreshing metadata for ledger #{} ({}).",
+            asset_id, ledger_canister_id,
+        );
+
+        let reply = self
+            .emit_transaction(
+                context.next_operation(),
+                ledger_canister_id,
+                Icrc1MetadataRequest {},
+                human_readable,
+            )
+            .await?;
+
+        // II.A. Extract and potentially update the symbol.
+        let new_symbol = reply.iter().find_map(|(key, value)| {
+            if key == "icrc1:symbol" {
+                Some(value.clone())
+            } else {
+                None
+            }
+        });
+
+        let Some(MetadataValue::Text(new_symbol)) = new_symbol else {
+            return Err(Error {
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+                message: format!(
+                    "Ledger {} icrc1_metadata response does not have an `icrc1:symbol`.",
+                    ledger_canister_id
+                ),
+                kind: ErrorKind::Postcondition {},
+            });
+        };
+
+        match ValidatedSymbol::try_from(new_symbol) {
+            Ok(new_symbol) => {
+                asset.set_symbol(new_symbol);
+            }
+            Err(err) => {
+                log_err(&format!(
+                    "Failed to validate `icrc1:symbol` ({}). Keeping the old symbol `{}`.",
+                    err,
+                    old_asset.symbol()
+                ));
+            }
+        }
+
+        // II.B. Refresh the ledger fee.
+        let new_fee = reply.into_iter().find_map(|(key, value)| {
+            if key == "icrc1:fee" {
+                Some(value)
+            } else {
+                None
+            }
+        });
+
+        let Some(MetadataValue::Nat(new_fee)) = new_fee else {
+            return Err(Error {
+                message: format!(
+                    "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
+                    ledger_canister_id
+                ),
+                kind: ErrorKind::Postcondition {},
+                code: u64::from(TransactionErrorCodes::PostConditionCode),
+            });
+        };
+
+        match decode_nat_to_u64(new_fee) {
+            Ok(new_fee_decimals) => {
+                asset.set_ledger_fee_decimals(new_fee_decimals);
+            }
+            Err(err) => {
+                log_err(&format!(
+                    "Failed to decode `icrc1:fee` as Nat ({}). Keeping the old fee {}.",
+                    err,
+                    old_asset.ledger_fee_decimals()
+                ));
+            }
+        }
+
+        Ok(asset)
+    }
+
     /// Refreshes the latest metadata for the managed assets, e.g., to update the symbols.
     pub async fn refresh_ledger_metadata(
         &mut self,
@@ -323,134 +443,27 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     ) -> Result<(), Error> {
         let (asset_0, asset_1) = self.assets();
 
-        // TODO: All calls in this loop could be started in parallel, and then `join_all`d.
-        for (asset_id, mut asset) in [asset_0, asset_1].into_iter().enumerate() {
-            let ledger_canister_id = asset.ledger_canister_id();
-            let old_asset = asset.clone();
+        let asset_0 = self
+            .refresh_ledger_metadata_impl(context, 0, asset_0)
+            .await?;
 
-            // Phase I. Tell KongSwap to refresh.
-            {
-                let human_readable = format!(
-                    "Calling KongSwapBackend.update_token for ledger #{} ({}).",
-                    asset_id, ledger_canister_id,
-                );
+        let asset_1 = self
+            .refresh_ledger_metadata_impl(context, 1, asset_1)
+            .await?;
 
-                let token = format!("IC.{}", ledger_canister_id);
-
-                let result = self
-                    .emit_transaction(
-                        context.next_operation(),
-                        *KONG_BACKEND_CANISTER_ID,
-                        UpdateTokenArgs { token },
-                        human_readable,
-                    )
-                    .await;
-
-                if let Err(err) = result {
-                    log_err(&format!(
-                        "Error while updating KongSwap token for ledger #{} ({}): {:?}",
-                        asset_id, ledger_canister_id, err,
-                    ));
-                };
-            }
-
-            // Phase II. Refresh the localy stored metadata.
-            let human_readable = format!(
-                "Refreshing metadata for ledger #{} ({}).",
-                asset_id, ledger_canister_id,
-            );
-
-            let reply = self
-                .emit_transaction(
-                    context.next_operation(),
-                    ledger_canister_id,
-                    Icrc1MetadataRequest {},
-                    human_readable,
-                )
-                .await?;
-
-            // II.A. Extract and potentially update the symbol.
-            let new_symbol = reply.iter().find_map(|(key, value)| {
-                if key == "icrc1:symbol" {
-                    Some(value.clone())
-                } else {
-                    None
-                }
-            });
-
-            let Some(MetadataValue::Text(new_symbol)) = new_symbol else {
-                return Err(Error {
-                    code: u64::from(TransactionErrorCodes::PostConditionCode),
-                    message: format!(
-                        "Ledger {} icrc1_metadata response does not have an `icrc1:symbol`.",
-                        ledger_canister_id
-                    ),
-                    kind: ErrorKind::Postcondition {},
-                });
-            };
-
-            match ValidatedSymbol::try_from(new_symbol) {
-                Ok(new_symbol) => {
-                    asset.set_symbol(new_symbol);
-                }
-                Err(err) => {
-                    log_err(&format!(
-                        "Failed to validate `icrc1:symbol` ({}). Keeping the old symbol `{}`.",
-                        err,
-                        old_asset.symbol()
-                    ));
-                }
-            }
-
-            // II.B. Refresh the ledger fee.
-            let new_fee = reply.into_iter().find_map(|(key, value)| {
-                if key == "icrc1:fee" {
-                    Some(value)
-                } else {
-                    None
-                }
-            });
-
-            let Some(MetadataValue::Nat(new_fee)) = new_fee else {
-                return Err(Error {
-                    message: format!(
-                        "Ledger {} icrc1_metadata response does not have an `icrc1:fee`.",
-                        ledger_canister_id
-                    ),
-                    kind: ErrorKind::Postcondition {},
-                    code: u64::from(TransactionErrorCodes::PostConditionCode),
-                });
-            };
-
-            match decode_nat_to_u64(new_fee) {
-                Ok(new_fee_decimals) => {
-                    asset.set_ledger_fee_decimals(new_fee_decimals);
-                }
-                Err(err) => {
-                    log_err(&format!(
-                        "Failed to decode `icrc1:fee` as Nat ({}). Keeping the old fee {}.",
-                        err,
-                        old_asset.ledger_fee_decimals()
-                    ));
-                }
-            }
-
-            self.with_balances_mut(|validated_balances| {
-                validated_balances.refresh_asset(asset_id, asset);
-            });
-        }
+        self.with_balances_mut(|validated_balances| {
+            validated_balances.refresh_asset(0, asset_0);
+            validated_balances.refresh_asset(1, asset_1);
+        });
 
         Ok(())
     }
 
+    /// Attempts to refresh the external custodian balances for both managed assets.
     pub async fn refresh_balances_impl(
         &mut self,
         context: &mut OperationContext,
     ) -> Result<(), Error> {
-        if let Err(err) = self.refresh_ledger_metadata(context).await {
-            log_err(&format!("Failed to refresh ledger metadata: {:?}", err));
-        }
-
         let remove_lp_token_amount = self.lp_balance(context).await?;
 
         let human_readable = format!(
@@ -491,12 +504,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         })?;
 
         self.with_balances_mut(|validated_balances| {
-            for (asset, &balance) in [asset_0, asset_1]
-                .into_iter()
-                .zip([balance_0_decimals, balance_1_decimals].iter())
-            {
-                validated_balances.set_external_custodian_balance(asset, balance);
-            }
+            validated_balances.set_external_custodian_balance(asset_0, balance_0_decimals);
+            validated_balances.set_external_custodian_balance(asset_1, balance_1_decimals);
         });
 
         Ok(())
