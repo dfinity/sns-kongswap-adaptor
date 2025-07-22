@@ -5,6 +5,8 @@ use std::{error::Error, fmt::Display, future::Future};
 
 pub mod ic_cdk_agent;
 pub mod icrc_requests;
+pub mod mock_agent;
+
 use std::fmt::Debug;
 pub trait Request: Send {
     fn method(&self) -> &'static str;

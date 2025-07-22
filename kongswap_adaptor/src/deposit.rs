@@ -4,7 +4,7 @@ use crate::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddPoolArgs,
     },
     tx_error_codes::TransactionErrorCodes,
-    validation::{decode_nat_to_u64, saturating_sub, ValidatedAllowance},
+    validation::{decode_nat_to_u64, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
