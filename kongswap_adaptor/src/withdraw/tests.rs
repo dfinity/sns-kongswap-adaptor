@@ -441,8 +441,6 @@ async fn test_withdraw_success() {
             Ok(Nat::from(amount_1_decimals - 3 * FEE_ICP)),
         );
 
-    // @todo add withdraw calls
-
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
