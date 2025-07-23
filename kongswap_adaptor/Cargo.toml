@@ -19,6 +19,10 @@ path = "src/canister.rs"
 name = "e2e"
 path = "tests/e2e.rs"
 
+[[test]]
+name = "broken_dex"
+path = "tests/broken_dex.rs"
+
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
