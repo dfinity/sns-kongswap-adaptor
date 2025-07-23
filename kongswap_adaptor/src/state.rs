@@ -202,6 +202,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         });
     }
 
+    fn with_audit_trail<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&StableAuditTrail) -> R,
+    {
+        self.audit_trail.with_borrow(|audit_trail| f(audit_trail))
+    }
+
     fn with_audit_trail_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut StableAuditTrail) -> R,
@@ -222,25 +229,60 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub fn finalize_audit_trail_transaction(&self, context: OperationContext) {
-        let last_entry = self.with_audit_trail_mut(|audit_trail| {
+        let index_value = self.with_audit_trail(|audit_trail| {
+            let num_transactions = audit_trail.len();
             audit_trail
                 .iter()
                 .rev()
-                .find(|transaction| transaction.operation.operation == context.operation)
+                .enumerate()
+                .find_map(|(rev_index, transaction)| {
+                    let transaction_operation = transaction.operation;
+
+                    if transaction_operation.operation == context.operation
+                        && !transaction_operation.step.is_final
+                    {
+                        let rev_index: u64 = match rev_index.try_into() {
+                            Ok(index) => index,
+                            Err(err) => {
+                                log_err(&format!(
+                                    "BUG: cannot convert usize {} to u64: {}",
+                                    rev_index, err
+                                ));
+                                return None;
+                            }
+                        };
+                        let index = num_transactions.saturating_sub(1).saturating_sub(rev_index);
+
+                        Some((index, transaction.clone()))
+                    } else {
+                        None
+                    }
+                })
         });
 
-        let Some(mut last_entry) = last_entry else {
+        let Some((index, mut value)) = index_value else {
             log_err(&format!(
-                "Audit trail is empty despite the operation being successfully completed. \
+                "Audit trail does not have an {} operation that could be finalized. \
                      Operation context: {:?}",
+                context.operation.name(),
                 context,
             ));
             return;
         };
 
-        last_entry.operation.step.is_final = true;
+        value.operation.step.is_final = true;
 
-        self.push_audit_trail_transaction(last_entry);
+        self.with_audit_trail_mut(|audit_trail| {
+            if index < audit_trail.len() {
+                audit_trail.set(index, &value);
+            } else {
+                log_err(&format!(
+                    "BUG: Invalid index {} for audit trail. Audit trail length: {}",
+                    index,
+                    audit_trail.len(),
+                ));
+            }
+        });
     }
 
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
@@ -292,5 +334,377 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .with_borrow(|audit_trail| audit_trail.iter().map(Transaction::from).collect());
 
         AuditTrail { transactions }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        state::storage::ConfigState, validation::ValidatedAsset, StableAuditTrail, StableBalances,
+        AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
+    };
+    use candid::Principal;
+    use ic_stable_structures::{
+        memory_manager::MemoryManager, Cell as StableCell, DefaultMemoryImpl, Vec as StableVec,
+    };
+    use icrc_ledger_types::icrc1::account::Account;
+    use kongswap_adaptor::{agent::mock_agent::MockAgent, audit::OperationContext};
+    use lazy_static::lazy_static;
+    use sns_treasury_manager::{
+        Asset, Operation, Step, TransactionWitness, TreasuryManagerOperation,
+    };
+    use std::cell::RefCell;
+
+    thread_local! {
+        static TEST_BALANCES: RefCell<StableBalances> = {
+            let memory_manager = MemoryManager::init(DefaultMemoryImpl::default());
+            let balances_memory = memory_manager.get(BALANCES_MEMORY_ID);
+            RefCell::new(StableCell::init(balances_memory, ConfigState::default()).unwrap())
+        };
+
+        static TEST_AUDIT_TRAIL: RefCell<StableAuditTrail> = {
+            let memory_manager = MemoryManager::init(DefaultMemoryImpl::default());
+            let audit_trail_memory = memory_manager.get(AUDIT_TRAIL_MEMORY_ID);
+            RefCell::new(StableVec::init(audit_trail_memory).unwrap())
+        };
+    }
+
+    lazy_static! {
+        static ref SELF_CANISTER_ID: Principal =
+            Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
+        static ref TEST_ACCOUNT: Account = Account {
+            owner: *SELF_CANISTER_ID,
+            subaccount: None,
+        };
+        static ref TEST_PRINCIPAL: Principal = Principal::from_text("2vxsx-fae").unwrap();
+        static ref TEST_OPERATION: TreasuryManagerOperation = TreasuryManagerOperation {
+            operation: Operation::Deposit,
+            step: Step {
+                index: 0,
+                is_final: false,
+            },
+        };
+        static ref TEST_TRANSACTION: StableTransaction = StableTransaction {
+            timestamp_ns: 1_000_000_000,
+            operation: *TEST_OPERATION,
+            canister_id: *TEST_PRINCIPAL,
+            result: Ok(TransactionWitness::NonLedger("test".to_string())),
+            human_readable: "test".to_string(),
+        };
+    }
+
+    fn create_test_adaptor() -> KongSwapAdaptor<MockAgent> {
+        let mock_agent = MockAgent::new(*SELF_CANISTER_ID);
+        let canister_id = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
+
+        KongSwapAdaptor::new(
+            || 1_000_000_000, // Mock timestamp
+            mock_agent,
+            canister_id,
+            &TEST_BALANCES,
+            &TEST_AUDIT_TRAIL,
+        )
+    }
+
+    fn create_test_assets() -> (ValidatedAsset, ValidatedAsset) {
+        let asset_0 = ValidatedAsset::try_from(Asset::Token {
+            ledger_canister_id: Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap(),
+            symbol: "ICP".to_string(),
+            ledger_fee_decimals: candid::Nat::from(10_000u64),
+        })
+        .unwrap();
+
+        let asset_1 = ValidatedAsset::try_from(Asset::Token {
+            ledger_canister_id: Principal::from_text("mxzaz-hqaaa-aaaar-qaada-cai").unwrap(),
+            symbol: "SNS".to_string(),
+            ledger_fee_decimals: candid::Nat::from(10_000u64),
+        })
+        .unwrap();
+
+        (asset_0, asset_1)
+    }
+
+    #[test]
+    fn test_finalize_transaction() {
+        let adaptor = create_test_adaptor();
+        let (asset_0, asset_1) = create_test_assets();
+
+        // Initialize the adaptor
+        adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
+
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
+
+        // Create a test operation context
+        let context = OperationContext::new(Operation::Deposit);
+
+        // Create and push a non-final transaction
+        let transaction = TEST_TRANSACTION.clone();
+
+        adaptor.push_audit_trail_transaction(transaction);
+
+        // Verify the transaction is not final initially
+        let audit_trail_before = adaptor.get_audit_trail();
+        assert_eq!(audit_trail_before.transactions.len(), 1);
+        assert!(
+            !audit_trail_before.transactions[0]
+                .treasury_manager_operation
+                .step
+                .is_final
+        );
+
+        // Finalize the transaction
+        adaptor.finalize_audit_trail_transaction(context);
+
+        // Verify the transaction is now finalized
+        let audit_trail_after = adaptor.get_audit_trail();
+        assert_eq!(audit_trail_after.transactions.len(), 1);
+        assert!(
+            audit_trail_after.transactions[0]
+                .treasury_manager_operation
+                .step
+                .is_final
+        );
+    }
+
+    #[test]
+    fn test_finalize_transaction_multiple_operations() {
+        let adaptor = create_test_adaptor();
+        let (asset_0, asset_1) = create_test_assets();
+
+        // Initialize the adaptor
+        adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
+
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
+
+        // Add multiple transactions with different operations
+        let deposit_transaction = StableTransaction {
+            timestamp_ns: 1_000_000_000,
+            operation: TreasuryManagerOperation {
+                operation: Operation::Deposit,
+                step: Step {
+                    index: 0,
+                    is_final: false,
+                },
+            },
+            ..TEST_TRANSACTION.clone()
+        };
+
+        let withdraw_transaction = StableTransaction {
+            timestamp_ns: 2_000_000_000,
+            operation: TreasuryManagerOperation {
+                operation: Operation::Withdraw,
+                step: Step {
+                    index: 0,
+                    is_final: false,
+                },
+            },
+            ..TEST_TRANSACTION.clone()
+        };
+
+        let another_deposit_transaction = StableTransaction {
+            timestamp_ns: 3_000_000_000,
+            operation: TreasuryManagerOperation {
+                operation: Operation::Deposit,
+                step: Step {
+                    index: 1,
+                    is_final: false,
+                },
+            },
+            ..TEST_TRANSACTION.clone()
+        };
+
+        adaptor.push_audit_trail_transaction(deposit_transaction);
+        adaptor.push_audit_trail_transaction(withdraw_transaction);
+        adaptor.push_audit_trail_transaction(another_deposit_transaction);
+
+        {
+            let audit_trail = adaptor.get_audit_trail();
+            assert_eq!(audit_trail.transactions.len(), 3);
+            assert!(
+                !audit_trail.transactions[0]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+            assert!(
+                !audit_trail.transactions[1]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+            assert!(
+                !audit_trail.transactions[2]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+        }
+
+        adaptor.finalize_audit_trail_transaction(OperationContext::new(Operation::Deposit));
+
+        {
+            let audit_trail = adaptor.get_audit_trail();
+            assert_eq!(audit_trail.transactions.len(), 3);
+            assert!(
+                !audit_trail.transactions[0]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+            assert!(
+                !audit_trail.transactions[1]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+            assert!(
+                audit_trail.transactions[2]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+        }
+
+        adaptor.finalize_audit_trail_transaction(OperationContext::new(Operation::Withdraw));
+
+        {
+            let audit_trail = adaptor.get_audit_trail();
+            assert_eq!(audit_trail.transactions.len(), 3);
+            assert!(
+                !audit_trail.transactions[0]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+            assert!(
+                audit_trail.transactions[1]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+            assert!(
+                audit_trail.transactions[2]
+                    .treasury_manager_operation
+                    .step
+                    .is_final
+            );
+        }
+    }
+
+    #[test]
+    fn test_finalize_transaction_no_matching_operation() {
+        let adaptor = create_test_adaptor();
+        let (asset_0, asset_1) = create_test_assets();
+
+        // Initialize the adaptor
+        adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
+
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
+
+        // Add a deposit transaction
+        let deposit_transaction = StableTransaction {
+            timestamp_ns: 1_000_000_000,
+            operation: TreasuryManagerOperation {
+                operation: Operation::Deposit,
+                ..*TEST_OPERATION
+            },
+            ..TEST_TRANSACTION.clone()
+        };
+
+        adaptor.push_audit_trail_transaction(deposit_transaction);
+
+        // Try to finalize a withdraw operation (which doesn't exist)
+        let withdraw_context = OperationContext::new(Operation::Withdraw);
+        adaptor.finalize_audit_trail_transaction(withdraw_context);
+
+        // Verify the deposit transaction remains non-final
+        let audit_trail = adaptor.get_audit_trail();
+        assert_eq!(audit_trail.transactions.len(), 1);
+        assert!(
+            !audit_trail.transactions[0]
+                .treasury_manager_operation
+                .step
+                .is_final
+        );
+    }
+
+    #[test]
+    fn test_finalize_transaction_already_final() {
+        let adaptor = create_test_adaptor();
+        let (asset_0, asset_1) = create_test_assets();
+
+        // Initialize the adaptor
+        adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
+
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
+
+        // Add a transaction that's already final
+        let final_transaction = StableTransaction {
+            timestamp_ns: 1_000_000_000,
+            operation: TreasuryManagerOperation {
+                operation: Operation::Deposit,
+                step: Step {
+                    index: 42,      // Arbitrary index
+                    is_final: true, // Already final
+                },
+            },
+            ..TEST_TRANSACTION.clone()
+        };
+
+        adaptor.push_audit_trail_transaction(final_transaction);
+
+        // Try to finalize it again
+        let context = OperationContext::new(Operation::Deposit);
+        adaptor.finalize_audit_trail_transaction(context);
+
+        // Verify it remains final (no change)
+        let audit_trail = adaptor.get_audit_trail();
+        assert_eq!(audit_trail.transactions.len(), 1);
+        assert!(
+            audit_trail.transactions[0]
+                .treasury_manager_operation
+                .step
+                .is_final
+        );
+    }
+
+    #[test]
+    fn test_finalize_transaction_empty_audit_trail() {
+        let adaptor = create_test_adaptor();
+        let (asset_0, asset_1) = create_test_assets();
+
+        // Initialize the adaptor
+        adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
+
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
+
+        // Try to finalize on empty audit trail
+        let context = OperationContext::new(Operation::Deposit);
+        adaptor.finalize_audit_trail_transaction(context);
+
+        // Verify audit trail remains empty
+        let audit_trail = adaptor.get_audit_trail();
+        assert_eq!(audit_trail.transactions.len(), 0);
     }
 }

@@ -495,14 +495,6 @@ pub(crate) fn decode_nat_to_u64(value: Nat) -> Result<u64, String> {
     }
 }
 
-pub(crate) fn saturating_sub(left: Nat, right: Nat) -> Nat {
-    if left < right {
-        Nat::from(0u8)
-    } else {
-        left - right
-    }
-}
-
 impl From<ValidatedAsset> for Asset {
     fn from(value: ValidatedAsset) -> Self {
         let ValidatedAsset::Token {
