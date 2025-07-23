@@ -121,18 +121,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // Take into account that the ledger fee required for returning the assets.
 
-        let (return_amount_0_decimals, return_amount_1_decimals) = {
-            let (balance_0_decimals, balance_1_decimals) =
-                self.get_ledger_balances(context).await?;
-
-            let return_amount_0_decimals =
-                balance_0_decimals.saturating_sub(asset_0.ledger_fee_decimals());
-
-            let return_amount_1_decimals =
-                balance_1_decimals.saturating_sub(asset_1.ledger_fee_decimals());
-
-            (return_amount_0_decimals, return_amount_1_decimals)
-        };
+        let (return_amount_0_decimals, return_amount_1_decimals) =
+            self.get_ledger_balances(context).await?;
 
         let mut withdraw_errors = vec![];
 
