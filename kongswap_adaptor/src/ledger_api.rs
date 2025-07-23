@@ -95,7 +95,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             fee: Some(Nat::from(asset.ledger_fee_decimals())),
             created_at_time: Some(self.time_ns()),
             memo: Some(Memo::from(Vec::<u8>::from(operation))),
-            amount: Nat::from(amount_decimals),
+            amount: Nat::from(amount_decimals - asset.ledger_fee_decimals()),
         };
 
         self.emit_transaction(operation, ledger_canister_id, request, human_readable)
