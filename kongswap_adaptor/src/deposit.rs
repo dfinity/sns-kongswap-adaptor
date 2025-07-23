@@ -113,15 +113,13 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         context: &mut OperationContext,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
-    ) -> Result<(Nat, Nat), Error> {
+    ) -> Result<(u64, u64), Error> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
-        let amount_0 = Nat::from(
-            allowance_0
-                .amount_decimals
-                .saturating_sub(allowance_0.asset.ledger_fee_decimals()),
-        );
+        let amount_0 = allowance_0
+            .amount_decimals
+            .saturating_sub(allowance_0.asset.ledger_fee_decimals());
         // amount_1 is a function of amount_0.
 
         // Step 4. Ensure the pool exists.
@@ -139,7 +137,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             );
             let request = AddLiquidityAmountsArgs {
                 token_0: token_0.clone(),
-                amount: amount_0.clone(),
+                amount: Nat::from(amount_0),
                 token_1: token_1.clone(),
             };
 
@@ -160,7 +158,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let request = AddLiquidityArgs {
             token_0,
-            amount_0: amount_0.clone(),
+            amount_0: Nat::from(amount_0),
             token_1,
             amount_1: amount_1.clone(),
 
@@ -176,6 +174,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             human_readable,
         )
         .await?;
+
+        let amount_1 = decode_nat_to_u64(amount_1).map_err(Error::new_postcondition)?;
 
         Ok((amount_0, amount_1))
     }
@@ -202,9 +202,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
-        let mut amount_0 = Nat::from(approved_amount_decimals_0);
-        let mut amount_1 = Nat::from(approved_amount_decimals_1);
-
+        // Update the allowances with the approved amounts (taking icrc2_approve fees into account).
         allowance_0.amount_decimals = approved_amount_decimals_0;
         allowance_1.amount_decimals = approved_amount_decimals_1;
 
@@ -219,40 +217,25 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }) = result
         {
             if self.is_pool_already_deployed_error(message) {
-                // If the pool already exists, we can proceed with a top-up.
-                (amount_0, amount_1) = self
+                // If the pool already exists, we can proceed with a top-up. The allowances
+                // need to be updated with the amounts that were actually used.
+                (allowance_0.amount_decimals, allowance_1.amount_decimals) = self
                     .topup_pool(context, allowance_0, allowance_1)
                     .await
                     .map_err(|err| vec![err])?;
             }
         }
 
-        // Actully transferred amounts
-        let amount_0_decimals = decode_nat_to_u64(amount_0).map_err(|err| {
-            vec![Error {
-                code: u64::from(TransactionErrorCodes::PostConditionCode),
-                message: err,
-                kind: ErrorKind::Postcondition {},
-            }]
-        })?;
-        let amount_1_decimals = decode_nat_to_u64(amount_1).map_err(|err| {
-            vec![Error {
-                code: u64::from(TransactionErrorCodes::PostConditionCode),
-                message: err,
-                kind: ErrorKind::Postcondition {},
-            }]
-        })?;
-
         // If pool wasn't deployed, funds are moved to the pool
         self.move_asset(
             allowance_0.asset,
-            amount_0_decimals,
+            allowance_0.amount_decimals,
             Party::TreasuryManager,
             Party::External,
         );
         self.move_asset(
             allowance_1.asset,
-            amount_1_decimals,
+            allowance_1.amount_decimals,
             Party::TreasuryManager,
             Party::External,
         );
@@ -263,14 +246,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             allowance_0.asset,
             balances_before.0,
             balances_after.0,
-            amount_0_decimals,
+            allowance_0.amount_decimals,
             true,
         );
         self.find_discrepency(
             allowance_1.asset,
             balances_before.1,
             balances_after.1,
-            amount_1_decimals,
+            allowance_1.amount_decimals,
             true,
         );
 
