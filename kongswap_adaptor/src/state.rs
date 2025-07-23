@@ -241,7 +241,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     if transaction_operation.operation == context.operation
                         && !transaction_operation.step.is_final
                     {
-                        let rev_index = rev_index as u64;
+                        let rev_index: u64 = match rev_index.try_into() {
+                            Ok(index) => index,
+                            Err(err) => {
+                                log_err(&format!(
+                                    "BUG: cannot convert usize {} to u64: {}",
+                                    rev_index, err
+                                ));
+                                return None;
+                            }
+                        };
                         let index = num_transactions.saturating_sub(1).saturating_sub(rev_index);
 
                         Some((index, transaction.clone()))
@@ -251,7 +260,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 })
         });
 
-        let Some(index_value) = index_value else {
+        let Some((index, mut value)) = index_value else {
             log_err(&format!(
                 "Audit trail does not have an {} operation that could be finalized. \
                      Operation context: {:?}",
@@ -261,13 +270,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return;
         };
 
-        let (index, mut value) = index_value;
-
         value.operation.step.is_final = true;
 
         self.with_audit_trail_mut(|audit_trail| {
             if index < audit_trail.len() {
                 audit_trail.set(index, &value);
+            } else {
+                log_err(&format!(
+                    "BUG: Invalid index {} for audit trail. Audit trail length: {}",
+                    index,
+                    audit_trail.len(),
+                ));
             }
         });
     }
@@ -420,12 +433,11 @@ mod test {
         // Initialize the adaptor
         adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
 
-        // Clear any existing audit trail
-        adaptor.with_audit_trail_mut(|audit_trail| {
-            while audit_trail.len() > 0 {
-                let _ = audit_trail.pop();
-            }
-        });
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
 
         // Create a test operation context
         let context = OperationContext::new(Operation::Deposit);
@@ -467,12 +479,11 @@ mod test {
         // Initialize the adaptor
         adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
 
-        // Clear audit trail
-        adaptor.with_audit_trail_mut(|audit_trail| {
-            while audit_trail.len() > 0 {
-                let _ = audit_trail.pop();
-            }
-        });
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
 
         // Add multiple transactions with different operations
         let deposit_transaction = StableTransaction {
@@ -597,12 +608,11 @@ mod test {
         // Initialize the adaptor
         adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
 
-        // Clear audit trail
-        adaptor.with_audit_trail_mut(|audit_trail| {
-            while audit_trail.len() > 0 {
-                let _ = audit_trail.pop();
-            }
-        });
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
 
         // Add a deposit transaction
         let deposit_transaction = StableTransaction {
@@ -639,12 +649,11 @@ mod test {
         // Initialize the adaptor
         adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
 
-        // Clear audit trail
-        adaptor.with_audit_trail_mut(|audit_trail| {
-            while audit_trail.len() > 0 {
-                let _ = audit_trail.pop();
-            }
-        });
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
 
         // Add a transaction that's already final
         let final_transaction = StableTransaction {
@@ -684,12 +693,11 @@ mod test {
         // Initialize the adaptor
         adaptor.initialize(asset_0, asset_1, *TEST_ACCOUNT, *TEST_ACCOUNT);
 
-        // Clear audit trail to ensure it's empty
-        adaptor.with_audit_trail_mut(|audit_trail| {
-            while audit_trail.len() > 0 {
-                let _ = audit_trail.pop();
-            }
-        });
+        // Start with an empty audit trail
+        {
+            let audit_trail_before = adaptor.get_audit_trail();
+            assert_eq!(audit_trail_before.transactions.len(), 0);
+        }
 
         // Try to finalize on empty audit trail
         let context = OperationContext::new(Operation::Deposit);
