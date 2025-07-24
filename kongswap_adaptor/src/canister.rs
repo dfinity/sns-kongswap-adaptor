@@ -108,7 +108,7 @@ fn check_access() {
 fn inspect_message() {
     let method_name = ic_cdk::api::call::method_name();
 
-    // Allow all queries to be called as update functions by anyone.
+    // Queries can be called by anyone, even if they are called as updates.
     if !["balances", "audit_trail"].contains(&method_name.as_str()) {
         check_access();
     }
