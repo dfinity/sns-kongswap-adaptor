@@ -108,6 +108,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok((approved_amount_decimals_0, approved_amount_decimals_1))
     }
 
+    // In case of a success, this function returns how much
+    // of each asset (including the transfer fee) is moved out.
     async fn topup_pool(
         &mut self,
         context: &mut OperationContext,
@@ -117,7 +119,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
-        // @todo if we should subtract it
         let amount_0 = allowance_0
             .amount_decimals
             .saturating_sub(allowance_0.asset.ledger_fee_decimals());
@@ -175,7 +176,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let amount_1 = decode_nat_to_u64(amount_1).map_err(Error::new_postcondition)?;
 
-        Ok((amount_0, amount_1))
+        // @todo if we should use the fee field in the response instead
+        Ok((
+            amount_0 + allowance_0.asset.ledger_fee_decimals(),
+            amount_1 + allowance_1.asset.ledger_fee_decimals(),
+        ))
     }
 
     fn is_pool_already_deployed_error(&self, message: &String) -> bool {
@@ -380,3 +385,6 @@ mod deposit_add_pool;
 
 #[cfg(test)]
 mod test_failed_transfer_from;
+
+#[cfg(test)]
+mod deposit_add_liquidity;
