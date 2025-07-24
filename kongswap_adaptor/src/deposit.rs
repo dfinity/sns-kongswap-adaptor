@@ -214,33 +214,22 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             code,
         }) = result
         {
-            let token_0_transfer_error = format!("Token_0 transfer failed");
-            let token_1_transfer_error =
-                format!("failed. IC.{}", allowance_1.asset.ledger_canister_id());
-
-            // If transferring any of the assets to the kongswap backend, through
-            // transferfrom has failed, the whole deposit operation is considered
-            // as a failure.
-            if message.ends_with(&token_0_transfer_error) {
-                // If transferring asset 0 fails, it means none of the assets
-                // are moved to the kongswap backend. Hence, we don't need to substract any
-                // return fees.
-                return Err(vec![Error {
-                    kind: ErrorKind::Backend {},
-                    message,
-                    code,
-                }]);
-            } else if message.ends_with(&token_1_transfer_error) {
-                // If transferring asset 1 fails, it means for the return of
-                // asset_0, a fee has to be paid.
-                self.charge_fee(allowance_0.asset);
+            if self.is_pool_already_deployed_error(&message) {
+                // If the pool already exists, we can proceed with a top-up. The allowances
+                // need to be updated with the amounts that were actually used.
+                (allowance_0.amount_decimals, allowance_1.amount_decimals) = self
+                    .topup_pool(context, allowance_0, allowance_1)
+                    .await
+                    .map_err(|err| vec![err])?;
+            } else {
+                // It corresponds to a failed transfer from call.
                 let balances_after = self.get_ledger_balances(context).await?;
 
                 self.find_discrepency(
                     allowance_0.asset,
                     balances_before.0,
                     balances_after.0,
-                    allowance_0.asset.ledger_fee_decimals(),
+                    0,
                     true,
                 );
                 self.find_discrepency(
@@ -251,20 +240,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     true,
                 );
 
-                return Err(vec![Error {
-                    kind: ErrorKind::Backend {},
-                    message,
-                    code,
-                }]);
-            } else if self.is_pool_already_deployed_error(&message) {
-                // If the pool already exists, we can proceed with a top-up. The allowances
-                // need to be updated with the amounts that were actually used.
-                (allowance_0.amount_decimals, allowance_1.amount_decimals) = self
-                    .topup_pool(context, allowance_0, allowance_1)
-                    .await
-                    .map_err(|err| vec![err])?;
-            } else {
-                log_err(&format!("Unexpected error: {}", message));
+                log_err(&format!(
+                    "Transferring one of the tokens from the manager to the DEX failed: {}",
+                    message
+                ));
+
                 return Err(vec![Error {
                     kind: ErrorKind::Backend {},
                     message,
