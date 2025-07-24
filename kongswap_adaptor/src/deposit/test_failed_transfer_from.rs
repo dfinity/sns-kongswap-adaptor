@@ -1,5 +1,6 @@
 use super::*;
-use crate::kong_types::{AddPoolReply, AddTokenArgs, AddTokenReply, ICReply};
+use crate::kong_types::{AddTokenArgs, AddTokenReply, ICReply};
+use crate::tx_error_codes::TransactionErrorCodes;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
@@ -7,12 +8,13 @@ use crate::{
 use candid::Principal;
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
+use icrc_ledger_types::icrc1::transfer::{Memo, TransferArg};
 use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, TreasuryManager,
-    TreasuryManagerInit,
+    Allowance, Asset, Balance, BalanceBook, Balances, BalancesRequest, DepositRequest, Step,
+    TreasuryManager, TreasuryManagerInit, TreasuryManagerOperation,
 };
 use std::cell::RefCell;
 
@@ -93,8 +95,24 @@ fn make_add_pool_request(
     }
 }
 
+fn make_transfer_request(
+    owner: Account,
+    fee: u64,
+    amount: u64,
+    operation: TreasuryManagerOperation,
+) -> TransferArg {
+    TransferArg {
+        from_subaccount: None,
+        to: owner,
+        fee: Some(Nat::from(fee)),
+        created_at_time: Some(0),
+        memo: Some(Memo::from(Vec::<u8>::from(operation))),
+        amount: Nat::from(amount - fee),
+    }
+}
+
 #[tokio::test]
-async fn test_deposit_success() {
+async fn test_failed_transfer_from() {
     const FEE_SNS: u64 = 10_500u64;
     const FEE_ICP: u64 = 9_500u64;
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
@@ -103,16 +121,19 @@ async fn test_deposit_success() {
 
     let token_0 = format!("IC.{}", sns_ledger);
     let token_1 = format!("IC.{}", icp_ledger);
+
+    let symbol_0 = "DAO".to_string();
+    let symbol_1 = "ICP".to_string();
     // Create test assets and request first
     let asset_0 = Asset::Token {
         ledger_canister_id: sns_ledger,
-        symbol: "DAO".to_string(),
+        symbol: symbol_0,
         ledger_fee_decimals: Nat::from(FEE_SNS),
     };
 
     let asset_1 = Asset::Token {
         ledger_canister_id: icp_ledger,
-        symbol: "ICP".to_string(),
+        symbol: symbol_1,
         ledger_fee_decimals: Nat::from(FEE_ICP),
     };
 
@@ -217,27 +238,55 @@ async fn test_deposit_success() {
                 token_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Ok(AddPoolReply::default()),
+            Err(format!("Token_0 transfer failed")),
         )
         .add_call(
             sns_ledger,
             make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
+            Nat::from(amount_0_decimals - FEE_SNS),
         )
         .add_call(
             icp_ledger, // @todo
             make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
+            Nat::from(amount_1_decimals - FEE_ICP),
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
+            make_transfer_request(
+                Account {
+                    owner: owner_account.owner,
+                    subaccount: None,
+                },
+                FEE_SNS,
+                amount_0_decimals - 1 * FEE_SNS,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 9,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(amount_0_decimals - 1 * FEE_SNS)),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
+            make_transfer_request(
+                Account {
+                    owner: owner_account.owner,
+                    subaccount: None,
+                },
+                FEE_ICP,
+                amount_1_decimals - 1 * FEE_ICP,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 10,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(amount_1_decimals - 1 * FEE_ICP)),
         );
 
     let mut kong_adaptor = KongSwapAdaptor::new(
@@ -273,6 +322,15 @@ async fn test_deposit_success() {
         "There are still some calls remaining"
     );
 
+    assert_eq!(
+        result,
+        Err(vec![Error {
+            code: TransactionErrorCodes::TemporaryUnavailableCode.into(),
+            message: "Token_0 transfer failed".to_string(),
+            kind: ErrorKind::Backend {}
+        }])
+    );
+
     let mut asset_0_balance = BalanceBook::empty()
         .with_treasury_owner(owner_account, "DAO Treasury".to_string())
         .with_treasury_manager(
@@ -286,7 +344,7 @@ async fn test_deposit_success() {
         .with_suspense(None)
         .with_fee_collector(None, None)
         .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+        .treasury_owner(amount_0_decimals - 2 * FEE_SNS);
 
     asset_0_balance.payees = Some(Balance {
         amount_decimals: 0_u64.into(),
@@ -312,7 +370,7 @@ async fn test_deposit_success() {
         .with_suspense(None)
         .with_fee_collector(None, None)
         .fee_collector(2 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
+        .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
 
     asset_1_balance.payees = Some(Balance {
         amount_decimals: 0_u64.into(),
@@ -333,5 +391,7 @@ async fn test_deposit_success() {
         }),
     };
 
-    assert_eq!(result, Ok(balances));
+    let cached_balances = kong_adaptor.balances(BalancesRequest {});
+
+    assert_eq!(cached_balances, Ok(balances));
 }

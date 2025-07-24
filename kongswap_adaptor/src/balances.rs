@@ -283,10 +283,8 @@ impl ValidatedBalances {
             return;
         };
 
-        if balance_after.abs_diff(balance_before) > asset.ledger_fee_decimals() + transferred_amount
-        {
-            balance_book.suspense += balance_before
-                .abs_diff(balance_after + asset.ledger_fee_decimals() + transferred_amount);
+        if balance_after.abs_diff(balance_before) > transferred_amount {
+            balance_book.suspense += balance_before.abs_diff(balance_after) - transferred_amount;
         }
     }
 

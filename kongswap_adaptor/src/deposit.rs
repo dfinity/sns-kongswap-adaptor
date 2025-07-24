@@ -3,6 +3,7 @@ use crate::{
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddPoolArgs,
     },
+    log_err,
     validation::{decode_nat_to_u64, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -116,12 +117,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
+        // @todo if we should subtract it
         let amount_0 = allowance_0
             .amount_decimals
             .saturating_sub(allowance_0.asset.ledger_fee_decimals());
-        // amount_1 is a function of amount_0.
-
-        // Step 4. Ensure the pool exists.
 
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
@@ -179,7 +178,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok((amount_0, amount_1))
     }
 
-    fn is_pool_already_deployed_error(&self, message: String) -> bool {
+    fn is_pool_already_deployed_error(&self, message: &String) -> bool {
         let lp_toke_symbol = self.lp_token();
 
         let tolerated_errors = [
@@ -187,7 +186,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             format!("Pool {} already exists", lp_toke_symbol),
         ];
 
-        tolerated_errors.contains(&message)
+        tolerated_errors.contains(message)
     }
 
     async fn deposit_into_dex(
@@ -212,20 +211,68 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         if let Err(Error {
             kind: ErrorKind::Backend {},
             message,
-            ..
+            code,
         }) = result
         {
-            if self.is_pool_already_deployed_error(message) {
+            let token_0_transfer_error = format!("Token_0 transfer failed");
+            let token_1_transfer_error =
+                format!("failed. IC.{}", allowance_1.asset.ledger_canister_id());
+
+            // If transferring any of the assets to the kongswap backend, through
+            // transferfrom has failed, the whole deposit operation is considered
+            // as a failure.
+            if message.ends_with(&token_0_transfer_error) {
+                // If transferring asset 0 fails, it means none of the assets
+                // are moved to the kongswap backend. Hence, we don't need to substract any
+                // return fees.
+                return Err(vec![Error {
+                    kind: ErrorKind::Backend {},
+                    message,
+                    code,
+                }]);
+            } else if message.ends_with(&token_1_transfer_error) {
+                // If transferring asset 1 fails, it means for the return of
+                // asset_0, a fee has to be paid.
+                self.charge_fee(allowance_0.asset);
+                let balances_after = self.get_ledger_balances(context).await?;
+
+                self.find_discrepency(
+                    allowance_0.asset,
+                    balances_before.0,
+                    balances_after.0,
+                    allowance_0.asset.ledger_fee_decimals(),
+                    true,
+                );
+                self.find_discrepency(
+                    allowance_1.asset,
+                    balances_before.1,
+                    balances_after.1,
+                    0,
+                    true,
+                );
+
+                return Err(vec![Error {
+                    kind: ErrorKind::Backend {},
+                    message,
+                    code,
+                }]);
+            } else if self.is_pool_already_deployed_error(&message) {
                 // If the pool already exists, we can proceed with a top-up. The allowances
                 // need to be updated with the amounts that were actually used.
                 (allowance_0.amount_decimals, allowance_1.amount_decimals) = self
                     .topup_pool(context, allowance_0, allowance_1)
                     .await
                     .map_err(|err| vec![err])?;
+            } else {
+                log_err(&format!("Unexpected error: {}", message));
+                return Err(vec![Error {
+                    kind: ErrorKind::Backend {},
+                    message,
+                    code,
+                }]);
             }
         }
 
-        // If pool wasn't deployed, funds are moved to the pool
         self.move_asset(
             allowance_0.asset,
             allowance_0.amount_decimals,
@@ -349,4 +396,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 }
 
 #[cfg(test)]
-mod tests;
+mod deposit_add_pool;
+
+#[cfg(test)]
+mod test_failed_transfer_from;

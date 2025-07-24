@@ -120,7 +120,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let (asset_0, asset_1) = self.assets();
 
         // Take into account that the ledger fee required for returning the assets.
-
         let (return_amount_0_decimals, return_amount_1_decimals) =
             self.get_ledger_balances(context).await?;
 
