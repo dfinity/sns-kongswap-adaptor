@@ -16,7 +16,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         context: &mut OperationContext,
     ) -> Result<(), Vec<Error>> {
-        let remove_lp_token_amount = self.lp_balance(context).await.map_err(|err| vec![err])?;
+        let remove_lp_token_amount = self.lp_balance(context).await;
 
         let human_readable =
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."
