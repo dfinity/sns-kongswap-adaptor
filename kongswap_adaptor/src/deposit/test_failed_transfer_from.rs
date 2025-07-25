@@ -13,7 +13,7 @@ use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, Balance, BalanceBook, Balances, BalancesRequest, DepositRequest, Step,
+    Allowance, Asset, BalanceBook, Balances, BalancesRequest, DepositRequest, Step,
     TreasuryManager, TreasuryManagerInit, TreasuryManagerOperation,
 };
 use std::cell::RefCell;
@@ -27,6 +27,10 @@ lazy_static! {
         owner: Principal::from_text("2vxsx-fae").unwrap(),
         subaccount: None,
     };
+    static ref MANAGER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: *SELF_CANISTER_ID,
+        subaccount: None,
+    };
 }
 
 use lazy_static::lazy_static;
@@ -34,6 +38,7 @@ use lazy_static::lazy_static;
 lazy_static! {
     static ref SELF_CANISTER_ID: Principal =
         Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
+    static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *SELF_CANISTER_ID);
 }
 
 fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
@@ -120,62 +125,29 @@ fn make_transfer_request(
     }
 }
 
+fn make_default_balance_book() -> BalanceBook {
+    BalanceBook::empty()
+        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
+        .with_treasury_manager(*MANAGER_ACCOUNT, MANAGER_NAME.clone())
+        .with_external_custodian(None, None)
+        .with_suspense(None)
+        .with_fee_collector(None, None)
+        .with_payees(None, None)
+        .with_payers(None, None)
+}
+
 #[tokio::test]
 async fn test_failed_transfer_from_0() {
     let amount_0_decimals = 500 * E8;
     let amount_1_decimals = 400 * E8;
 
-    let mut asset_0_balance = BalanceBook::empty()
-        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: *SELF_CANISTER_ID,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", *SELF_CANISTER_ID),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
+    let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
         .treasury_owner(amount_0_decimals - 2 * FEE_SNS);
 
-    asset_0_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_0_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-
-    let mut asset_1_balance = BalanceBook::empty()
-        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: *SELF_CANISTER_ID,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", *SELF_CANISTER_ID),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
+    let asset_1_balance = make_default_balance_book()
         .fee_collector(2 * FEE_ICP)
         .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
-
-    asset_1_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_1_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
 
     run_failed_transfer_from_test(
         true,
@@ -192,63 +164,15 @@ async fn test_failed_transfer_from_1() {
     let amount_0_decimals = 500 * E8;
     let amount_1_decimals = 400 * E8;
 
-    let mut asset_0_balance = BalanceBook::empty()
-        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: *SELF_CANISTER_ID,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", *SELF_CANISTER_ID),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
+    let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
+        .treasury_owner(amount_0_decimals - 4 * FEE_SNS)
         .treasury_manager(2 * FEE_SNS)
-        .treasury_owner(amount_0_decimals - 4 * FEE_SNS);
+        .suspense(2 * FEE_SNS);
 
-    asset_0_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_0_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_0_balance.suspense = Some(Balance {
-        amount_decimals: (2 * FEE_SNS).into(),
-        account: None,
-        name: None,
-    });
-
-    let mut asset_1_balance = BalanceBook::empty()
-        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: *SELF_CANISTER_ID,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", *SELF_CANISTER_ID),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
+    let asset_1_balance = make_default_balance_book()
         .fee_collector(2 * FEE_ICP)
         .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
-
-    asset_1_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_1_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
 
     run_failed_transfer_from_test(
         false,
