@@ -3,13 +3,11 @@ use crate::{
         kong_lp_balance_to_decimals, AddTokenArgs, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
     },
-    KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
+    log_err, KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::{Nat, Principal};
-use itertools::{Either, Itertools};
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::Error;
-use std::collections::BTreeMap;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     pub fn lp_token(&self) -> String {
@@ -51,7 +49,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
     }
 
-    pub async fn lp_balance(&mut self, context: &mut OperationContext) -> Result<Nat, Error> {
+    pub async fn lp_balance(&mut self, context: &mut OperationContext) -> Nat {
         let request = UserBalancesArgs {
             principal_id: self.id.to_string(),
         };
@@ -59,48 +57,48 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let human_readable =
             "Calling KongSwapBackend.user_balances to get LP balances.".to_string();
 
-        let replies = self
+        let result = self
             .emit_transaction(
                 context.next_operation(),
                 *KONG_BACKEND_CANISTER_ID,
                 request,
                 human_readable,
             )
-            .await?;
+            .await;
 
-        if replies.is_empty() {
-            return Ok(Nat::from(0_u8));
-        }
+        let replies = match result {
+            Ok(replies) => replies,
+            Err(err) => {
+                log_err(&format!(
+                    "Failed to call KongSwapBackend.user_balances to get LP balance for {}: {}. \
+                     Defaulting to 0.",
+                    self.lp_token(),
+                    err.message
+                ));
+                return Nat::from(0_u8);
+            }
+        };
 
-        let (balances, errors): (BTreeMap<_, _>, Vec<_>) = replies.into_iter().partition_map(
+        let lp_balance = replies.into_iter().find_map(
             |UserBalancesReply::LP(UserBalanceLPReply {
                  symbol, balance, ..
              })| {
-                match kong_lp_balance_to_decimals(balance) {
-                    Ok(balance) => Either::Left((symbol, balance)),
-                    Err(err) => {
-                        Either::Right(format!("Failed to convert balance for {}: {}", symbol, err))
-                    }
+                if symbol == self.lp_token() {
+                    Some(kong_lp_balance_to_decimals(balance))
+                } else {
+                    None
                 }
             },
         );
 
-        if !errors.is_empty() {
-            return Err(Error::new_backend(format!(
-                "Failed to convert balances: {:?}",
-                errors.join(", ")
-            )));
+        if let Some(lp_balance) = lp_balance {
+            lp_balance
+        } else {
+            log_err(&format!(
+                "Failed to get LP balance for {}. Defaulting to 0.",
+                self.lp_token(),
+            ));
+            Nat::from(0_u8)
         }
-
-        let lp_token = self.lp_token();
-
-        let Some((_, balance)) = balances.into_iter().find(|(token, _)| *token == lp_token) else {
-            return Err(Error::new_backend(format!(
-                "Failed to get LP balance for {}.",
-                lp_token
-            )));
-        };
-
-        Ok(balance)
     }
 }
