@@ -7,7 +7,6 @@ use crate::{
     validation::decode_nat_to_u64,
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
-use candid::Nat;
 use icrc_ledger_types::icrc1::account::Account;
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::{Error, ErrorKind};
@@ -17,12 +16,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         context: &mut OperationContext,
     ) -> Result<(), Vec<Error>> {
-        let remove_lp_token_amount = self.lp_balance(context).await;
-
-        if remove_lp_token_amount == Nat::from(0u8) {
-            // Nothing to withdraw.
-            return Ok(());
-        }
+        let remove_lp_token_amount = self.lp_balance(context).await.map_err(|err| vec![err])?;
 
         let human_readable =
             "Calling KongSwapBackend.remove_liquidity to withdraw all allocated tokens."

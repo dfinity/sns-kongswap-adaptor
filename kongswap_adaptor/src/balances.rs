@@ -466,7 +466,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         &mut self,
         context: &mut OperationContext,
     ) -> Result<(), Error> {
-        let remove_lp_token_amount = self.lp_balance(context).await;
+        let remove_lp_token_amount = self.lp_balance(context).await?;
 
         let human_readable = format!(
             "Calling KongSwapBackend.remove_liquidity_amounts to estimate how much liquidity can be removed for LP token amount {}.",

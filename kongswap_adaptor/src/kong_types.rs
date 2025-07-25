@@ -6,16 +6,23 @@ use sns_treasury_manager::{TransactionWitness, Transfer};
 const E8: u64 = 100_000_000; // 10^8, used for converting LP balances to decimals
 
 // ----------------- begin:add_liquidity_amounts -----------------
-pub fn kong_lp_balance_to_decimals(lp_balance: f64) -> Nat {
-    let result_u64 = if lp_balance.is_nan() {
-        u64::MAX // Handle NaN by returning the maximum value, so we attempt to withdraw all.
-    } else {
-        let e8_value = E8 as f64;
-        let result_f64 = lp_balance * e8_value;
-        result_f64.clamp(0.0, u64::MAX as f64).round() as u64
-    };
+pub fn kong_lp_balance_to_decimals(lp_balance: f64) -> Result<Nat, String> {
+    // Check that lp_balance is valid before conversion
+    if !lp_balance.is_finite() || lp_balance < 0.0 {
+        return Err("Invalid LP balance value".to_string());
+    }
 
-    Nat::from(result_u64)
+    // Calculate with overflow checking
+    let e8_value = E8 as f64;
+    let result_f64 = lp_balance * e8_value;
+
+    // Ensure the result fits in u64 range
+    if result_f64 > u64::MAX as f64 {
+        return Err("LP balance conversion exceeds u64 maximum".to_string());
+    }
+
+    // Convert to Nat (safe because we've checked the bounds)
+    Ok(Nat::from(result_f64.round() as u64))
 }
 
 #[derive(CandidType, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
