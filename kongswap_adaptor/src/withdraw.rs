@@ -71,9 +71,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }]);
         }
 
-        // TODO Unwrapping
         let balances_after = self.get_ledger_balances(context).await?;
 
+        // TODO Unwrapping
         let amount_0 = decode_nat_to_u64(amount_0 + lp_fee_0).unwrap();
         let amount_1 = decode_nat_to_u64(amount_1 + lp_fee_1).unwrap();
 

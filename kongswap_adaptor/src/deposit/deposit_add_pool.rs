@@ -93,6 +93,34 @@ fn make_add_pool_request(
     }
 }
 
+fn make_add_pool_reply(token_0: &String, token_1: &String) -> AddPoolReply {
+    AddPoolReply {
+        tx_id: 0,
+        pool_id: 0,
+        request_id: 0,
+        status: "Success".to_string(),
+        name: String::default(),
+        symbol: String::default(),
+        chain_0: String::default(),
+        address_0: String::default(),
+        symbol_0: token_0.clone(),
+        amount_0: Nat::from(0_u64),
+        balance_0: Nat::from(0_u64),
+        chain_1: String::default(),
+        address_1: String::default(),
+        symbol_1: token_1.clone(),
+        amount_1: Nat::from(0_u64),
+        balance_1: Nat::from(0_u64),
+        lp_fee_bps: 0_u8,
+        lp_token_symbol: format!("{}_{}", token_0, token_1),
+        add_lp_token_amount: Nat::from(0_u64),
+        transfer_ids: vec![],
+        claim_ids: vec![],
+        is_removed: false,
+        ts: 0,
+    }
+}
+
 #[tokio::test]
 async fn test_deposit_success() {
     const FEE_SNS: u64 = 10_500u64;
@@ -103,16 +131,20 @@ async fn test_deposit_success() {
 
     let token_0 = format!("IC.{}", sns_ledger);
     let token_1 = format!("IC.{}", icp_ledger);
+
+    let symbol_0 = "DAO".to_string();
+    let symbol_1 = "ICP".to_string();
+
     // Create test assets and request first
     let asset_0 = Asset::Token {
         ledger_canister_id: sns_ledger,
-        symbol: "DAO".to_string(),
+        symbol: symbol_0.clone(),
         ledger_fee_decimals: Nat::from(FEE_SNS),
     };
 
     let asset_1 = Asset::Token {
         ledger_canister_id: icp_ledger,
-        symbol: "ICP".to_string(),
+        symbol: symbol_1.clone(),
         ledger_fee_decimals: Nat::from(FEE_ICP),
     };
 
@@ -217,7 +249,7 @@ async fn test_deposit_success() {
                 token_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Ok(AddPoolReply::default()),
+            Ok(make_add_pool_reply(&symbol_0, &symbol_1)),
         )
         .add_call(
             sns_ledger,

@@ -175,6 +175,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         });
     }
 
+    // Transferred amount includes the ledger fee and the recieved amount
     pub fn find_discrepency(
         &mut self,
         asset: ValidatedAsset,

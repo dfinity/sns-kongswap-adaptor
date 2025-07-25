@@ -184,6 +184,34 @@ fn make_transfer_request(
     }
 }
 
+fn make_add_pool_reply(token_0: &String, token_1: &String) -> AddPoolReply {
+    AddPoolReply {
+        tx_id: 0,
+        pool_id: 0,
+        request_id: 0,
+        status: "Success".to_string(),
+        name: String::default(),
+        symbol: String::default(),
+        chain_0: String::default(),
+        address_0: String::default(),
+        symbol_0: token_0.clone(),
+        amount_0: Nat::from(0_u64),
+        balance_0: Nat::from(0_u64),
+        chain_1: String::default(),
+        address_1: String::default(),
+        symbol_1: token_1.clone(),
+        amount_1: Nat::from(0_u64),
+        balance_1: Nat::from(0_u64),
+        lp_fee_bps: 0_u8,
+        lp_token_symbol: format!("{}_{}", token_0, token_1),
+        add_lp_token_amount: Nat::from(0_u64),
+        transfer_ids: vec![],
+        claim_ids: vec![],
+        is_removed: false,
+        ts: 0,
+    }
+}
+
 #[tokio::test]
 async fn test_withdraw_success() {
     const FEE_SNS: u64 = 10_500u64;
@@ -312,7 +340,7 @@ async fn test_withdraw_success() {
                 token_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Ok(AddPoolReply::default()),
+            Ok(make_add_pool_reply(&symbol_0, &symbol_1)),
         )
         .add_call(
             sns_ledger,
