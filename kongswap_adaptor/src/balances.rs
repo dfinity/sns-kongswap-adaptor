@@ -283,6 +283,10 @@ impl ValidatedBalances {
             return;
         };
 
+        // On a happy deposit, the balance of the trasury manager
+        // should not change more than the expected amount. Otherwise,
+        // it means that by mistake more tokens than expected are
+        // transferred to the external.
         if balance_after.abs_diff(balance_before) > transferred_amount {
             balance_book.suspense += balance_before.abs_diff(balance_after) - transferred_amount;
         }
