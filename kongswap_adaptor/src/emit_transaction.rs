@@ -5,7 +5,7 @@ use crate::{
 use candid::{CandidType, Principal};
 use kongswap_adaptor::agent::{AbstractAgent, Request};
 use kongswap_adaptor::requests::CommitStateRequest;
-use sns_treasury_manager::{Error, TreasuryManagerOperation};
+use sns_treasury_manager::{Error, TransactionWitness, TreasuryManagerOperation};
 use std::fmt::Debug;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
@@ -20,6 +20,15 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     where
         R: Request + Clone + CandidType + Debug,
     {
+        let pending_transaction = StableTransaction {
+            timestamp_ns: self.time_ns(),
+            result: Ok(TransactionWitness::Pending),
+            canister_id,
+            human_readable,
+            operation,
+        };
+        let index = self.push_audit_trail_transaction(pending_transaction.clone());
+
         let call_result = self
             .agent
             .call(canister_id, request.clone())
@@ -42,15 +51,15 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             }
         };
 
-        let transaction = StableTransaction {
-            timestamp_ns: self.time_ns(),
-            canister_id,
-            result,
-            human_readable,
-            operation,
-        };
-
-        self.push_audit_trail_transaction(transaction);
+        if let Some(index) = index {
+            self.set_audit_trail_transaction_result(
+                index,
+                StableTransaction {
+                    result,
+                    ..pending_transaction
+                },
+            );
+        }
 
         // Self-call to ensure that the state has been committed, to prevent state roll back in case
         // of a panic that occurs before the next (meaningful) async operation. This is recommended:
