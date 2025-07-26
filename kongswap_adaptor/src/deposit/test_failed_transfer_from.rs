@@ -13,18 +13,32 @@ use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, Balance, BalanceBook, Balances, BalancesRequest, DepositRequest, Step,
+    Allowance, Asset, BalanceBook, Balances, BalancesRequest, DepositRequest, Step,
     TreasuryManager, TreasuryManagerInit, TreasuryManagerOperation,
 };
 use std::cell::RefCell;
 
 const E8: u64 = 100_000_000;
+const FEE_SNS: u64 = 10_500u64;
+const FEE_ICP: u64 = 9_500u64;
+
+lazy_static! {
+    static ref OWNER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: Principal::from_text("2vxsx-fae").unwrap(),
+        subaccount: None,
+    };
+    static ref MANAGER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: *SELF_CANISTER_ID,
+        subaccount: None,
+    };
+}
 
 use lazy_static::lazy_static;
 
 lazy_static! {
     static ref SELF_CANISTER_ID: Principal =
         Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
+    static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *SELF_CANISTER_ID);
 }
 
 fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
@@ -111,305 +125,72 @@ fn make_transfer_request(
     }
 }
 
-#[tokio::test]
-async fn test_failed_transfer_from_0() {
-    const FEE_SNS: u64 = 10_500u64;
-    const FEE_ICP: u64 = 9_500u64;
-    let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
-    let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
-
-    let token_0 = format!("IC.{}", sns_ledger);
-    let token_1 = format!("IC.{}", icp_ledger);
-
-    let symbol_0 = "DAO".to_string();
-    let symbol_1 = "ICP".to_string();
-    // Create test assets and request first
-    let asset_0 = Asset::Token {
-        ledger_canister_id: sns_ledger,
-        symbol: symbol_0,
-        ledger_fee_decimals: Nat::from(FEE_SNS),
-    };
-
-    let asset_1 = Asset::Token {
-        ledger_canister_id: icp_ledger,
-        symbol: symbol_1,
-        ledger_fee_decimals: Nat::from(FEE_ICP),
-    };
-
-    let owner_account = sns_treasury_manager::Account {
-        owner: Principal::from_text("2vxsx-fae").unwrap(),
-        subaccount: None,
-    };
-
-    thread_local! {
-        static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
-            RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
-
-        static BALANCES: RefCell<StableBalances> =
-            MEMORY_MANAGER.with(|memory_manager|
-                RefCell::new(
-                    StableCell::init(
-                        memory_manager.borrow().get(BALANCES_MEMORY_ID),
-                        ConfigState::default()
-                    )
-                    .expect("BALANCES init should not cause errors")
-                )
-            );
-
-        static AUDIT_TRAIL: RefCell<StableAuditTrail> =
-            MEMORY_MANAGER.with(|memory_manager|
-                RefCell::new(
-                    StableVec::init(
-                        memory_manager.borrow().get(AUDIT_TRAIL_MEMORY_ID)
-                    )
-                    .expect("AUDIT_TRAIL init should not cause errors")
-                )
-            );
-    }
-
-    let amount_0_decimals = 500 * E8;
-    let amount_1_decimals = 400 * E8;
-    let allowances = vec![
-        // SNS
-        Allowance {
-            asset: asset_0.clone(),
-            owner_account,
-            amount_decimals: Nat::from(amount_0_decimals),
-        },
-        // ICP
-        Allowance {
-            asset: asset_1.clone(),
-            owner_account,
-            amount_decimals: Nat::from(amount_1_decimals),
-        },
-    ];
-
-    let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
-        .add_call(
-            sns_ledger,
-            make_approve_request(amount_0_decimals, FEE_SNS),
-            Ok(Nat::from(amount_0_decimals)),
-        )
-        .add_call(
-            icp_ledger,
-            make_approve_request(amount_1_decimals, FEE_ICP),
-            Ok(Nat::from(amount_1_decimals)),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_0_decimals - FEE_SNS),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_1_decimals - FEE_ICP),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_0.clone()),
-            Ok(make_add_token_reply(
-                1,
-                "IC".to_string(),
-                sns_id,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_1.clone()),
-            Ok(make_add_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_pool_request(
-                token_0.clone(),
-                amount_0_decimals - 2 * FEE_SNS,
-                token_1.clone(),
-                amount_1_decimals - 2 * FEE_ICP,
-            ),
-            Err(format!("Token_0 transfer failed")),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_0_decimals - FEE_SNS),
-        )
-        .add_call(
-            icp_ledger, // @todo
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_1_decimals - FEE_ICP),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_0_decimals - FEE_SNS),
-        )
-        .add_call(
-            icp_ledger, // @todo
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_1_decimals - FEE_ICP),
-        )
-        .add_call(
-            sns_ledger,
-            make_transfer_request(
-                Account {
-                    owner: owner_account.owner,
-                    subaccount: None,
-                },
-                FEE_SNS,
-                amount_0_decimals - 1 * FEE_SNS,
-                TreasuryManagerOperation {
-                    operation: sns_treasury_manager::Operation::Deposit,
-                    step: Step {
-                        index: 11,
-                        is_final: false,
-                    },
-                },
-            ),
-            Ok(Nat::from(amount_0_decimals - 1 * FEE_SNS)),
-        )
-        .add_call(
-            icp_ledger,
-            make_transfer_request(
-                Account {
-                    owner: owner_account.owner,
-                    subaccount: None,
-                },
-                FEE_ICP,
-                amount_1_decimals - 1 * FEE_ICP,
-                TreasuryManagerOperation {
-                    operation: sns_treasury_manager::Operation::Deposit,
-                    step: Step {
-                        index: 12,
-                        is_final: false,
-                    },
-                },
-            ),
-            Ok(Nat::from(amount_1_decimals - 1 * FEE_ICP)),
-        );
-
-    let mut kong_adaptor = KongSwapAdaptor::new(
-        || 0, // Mock time function
-        mock_agent,
-        *SELF_CANISTER_ID,
-        &BALANCES,
-        &AUDIT_TRAIL,
-    );
-
-    let init = TreasuryManagerInit {
-        allowances: allowances.clone(),
-    };
-
-    let ValidatedTreasuryManagerInit {
-        allowance_0,
-        allowance_1,
-    } = init.try_into().unwrap();
-
-    // Initialize and test
-    kong_adaptor.initialize(
-        allowance_0.asset,
-        allowance_1.asset,
-        allowance_0.owner_account,
-        allowance_1.owner_account,
-    );
-
-    // This should now work without panicking
-    let result = kong_adaptor.deposit(DepositRequest { allowances }).await;
-
-    assert!(
-        kong_adaptor.agent.finished_calls(),
-        "There are still some calls remaining"
-    );
-
-    assert_eq!(
-        result,
-        Err(vec![Error {
-            code: TransactionErrorCodes::TemporaryUnavailableCode.into(),
-            message: "Token_0 transfer failed".to_string(),
-            kind: ErrorKind::Backend {}
-        }])
-    );
-
-    let mut asset_0_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: kong_adaptor.id,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", kong_adaptor.id),
-        )
+fn make_default_balance_book() -> BalanceBook {
+    BalanceBook::empty()
+        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
+        .with_treasury_manager(*MANAGER_ACCOUNT, MANAGER_NAME.clone())
         .with_external_custodian(None, None)
         .with_suspense(None)
         .with_fee_collector(None, None)
+        .with_payees(None, None)
+        .with_payers(None, None)
+}
+
+#[tokio::test]
+async fn test_failed_transfer_from_0() {
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
+
+    let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
         .treasury_owner(amount_0_decimals - 2 * FEE_SNS);
 
-    asset_0_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_0_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-
-    let mut asset_1_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: kong_adaptor.id,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", kong_adaptor.id),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
+    let asset_1_balance = make_default_balance_book()
         .fee_collector(2 * FEE_ICP)
         .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
 
-    asset_1_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_1_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-
-    let balances = Balances {
-        timestamp_ns: 0,
-        asset_to_balances: Some(btreemap! {
-            asset_0 => asset_0_balance,
-            asset_1 => asset_1_balance,
-        }),
-    };
-
-    let cached_balances = kong_adaptor.balances(BalancesRequest {});
-
-    assert_eq!(cached_balances, Ok(balances));
+    run_failed_transfer_from_test(
+        true,
+        amount_0_decimals,
+        amount_1_decimals,
+        asset_0_balance,
+        asset_1_balance,
+    )
+    .await;
 }
 
 #[tokio::test]
 async fn test_failed_transfer_from_1() {
-    const FEE_SNS: u64 = 10_500u64;
-    const FEE_ICP: u64 = 9_500u64;
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
+
+    let asset_0_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_SNS)
+        .treasury_owner(amount_0_decimals - 4 * FEE_SNS)
+        .treasury_manager(2 * FEE_SNS)
+        .suspense(2 * FEE_SNS);
+
+    let asset_1_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_ICP)
+        .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
+
+    run_failed_transfer_from_test(
+        false,
+        amount_0_decimals,
+        amount_1_decimals,
+        asset_0_balance,
+        asset_1_balance,
+    )
+    .await;
+}
+
+async fn run_failed_transfer_from_test(
+    transfer_0_fails: bool,
+    amount_0_decimals: u64,
+    amount_1_decimals: u64,
+    asset_0_balance: BalanceBook,
+    asset_1_balance: BalanceBook,
+) {
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
     let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
@@ -430,11 +211,6 @@ async fn test_failed_transfer_from_1() {
         ledger_canister_id: icp_ledger,
         symbol: symbol_1,
         ledger_fee_decimals: Nat::from(FEE_ICP),
-    };
-
-    let owner_account = sns_treasury_manager::Account {
-        owner: Principal::from_text("2vxsx-fae").unwrap(),
-        subaccount: None,
     };
 
     thread_local! {
@@ -463,22 +239,37 @@ async fn test_failed_transfer_from_1() {
             );
     }
 
-    let amount_0_decimals = 500 * E8;
-    let amount_1_decimals = 400 * E8;
     let allowances = vec![
         // SNS
         Allowance {
             asset: asset_0.clone(),
-            owner_account,
+            owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_0_decimals),
         },
         // ICP
         Allowance {
             asset: asset_1.clone(),
-            owner_account,
+            owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_1_decimals),
         },
     ];
+
+    // If transferring token0 fails, then from the perspective of
+    // the treasury manager we have the exact same amount of balance
+    // as before. Otherwise, if transferring token1 fails, then
+    // kongswap backend has to send token0 back, with a round-trip
+    // of fees deducted.
+    let (balance_0_after_add_pool, error_message) = if transfer_0_fails {
+        (
+            amount_0_decimals - FEE_SNS,
+            format!("Token_0 transfer failed"),
+        )
+    } else {
+        (
+            amount_0_decimals - 3 * FEE_SNS,
+            format!("Token_1 transfer failed"),
+        )
+    };
 
     let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
         .add_call(
@@ -533,12 +324,12 @@ async fn test_failed_transfer_from_1() {
                 token_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Err(format!("Token_0 transfer failed")),
+            Err(error_message.clone()),
         )
         .add_call(
             sns_ledger,
             make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_0_decimals - 2 * FEE_SNS),
+            Nat::from(balance_0_after_add_pool),
         )
         .add_call(
             icp_ledger, // @todo
@@ -548,7 +339,7 @@ async fn test_failed_transfer_from_1() {
         .add_call(
             sns_ledger,
             make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(amount_0_decimals - 2 * FEE_SNS),
+            Nat::from(balance_0_after_add_pool),
         )
         .add_call(
             icp_ledger, // @todo
@@ -559,11 +350,11 @@ async fn test_failed_transfer_from_1() {
             sns_ledger,
             make_transfer_request(
                 Account {
-                    owner: owner_account.owner,
+                    owner: OWNER_ACCOUNT.owner,
                     subaccount: None,
                 },
                 FEE_SNS,
-                amount_0_decimals - 2 * FEE_SNS,
+                balance_0_after_add_pool,
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
@@ -572,13 +363,13 @@ async fn test_failed_transfer_from_1() {
                     },
                 },
             ),
-            Ok(Nat::from(amount_0_decimals - 2 * FEE_SNS)),
+            Ok(Nat::from(balance_0_after_add_pool)),
         )
         .add_call(
             icp_ledger,
             make_transfer_request(
                 Account {
-                    owner: owner_account.owner,
+                    owner: OWNER_ACCOUNT.owner,
                     subaccount: None,
                 },
                 FEE_ICP,
@@ -631,68 +422,10 @@ async fn test_failed_transfer_from_1() {
         result,
         Err(vec![Error {
             code: TransactionErrorCodes::TemporaryUnavailableCode.into(),
-            message: "Token_0 transfer failed".to_string(),
+            message: error_message,
             kind: ErrorKind::Backend {}
         }])
     );
-
-    let mut asset_0_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: kong_adaptor.id,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", kong_adaptor.id),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
-        .fee_collector(2 * FEE_SNS)
-        .treasury_manager(FEE_SNS)
-        .treasury_owner(amount_0_decimals - 3 * FEE_SNS);
-
-    asset_0_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_0_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_0_balance.suspense = Some(Balance {
-        amount_decimals: FEE_SNS.into(),
-        account: None,
-        name: None,
-    });
-
-    let mut asset_1_balance = BalanceBook::empty()
-        .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-        .with_treasury_manager(
-            sns_treasury_manager::Account {
-                owner: kong_adaptor.id,
-                subaccount: None,
-            },
-            format!("KongSwapAdaptor({})", kong_adaptor.id),
-        )
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
-        .fee_collector(2 * FEE_ICP)
-        .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
-
-    asset_1_balance.payees = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
-    asset_1_balance.payers = Some(Balance {
-        amount_decimals: 0_u64.into(),
-        account: None,
-        name: None,
-    });
 
     let balances = Balances {
         timestamp_ns: 0,
