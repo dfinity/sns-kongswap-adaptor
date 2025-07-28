@@ -230,3 +230,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
 #[cfg(test)]
 mod withdraw_happy_path;
+
+#[cfg(test)]
+mod withdraw_retry;
