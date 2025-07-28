@@ -42,9 +42,9 @@ fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
     }
 }
 
-fn make_balance_request(self_id: Principal) -> Account {
+fn make_balance_request() -> Account {
     Account {
-        owner: self_id,
+        owner: *SELF_CANISTER_ID,
         subaccount: None,
     }
 }
@@ -107,7 +107,6 @@ async fn test_deposit_success() {
     const FEE_ICP: u64 = 9_500u64;
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
 
     let token_0 = format!("IC.{}", sns_ledger);
     let token_1 = format!("IC.{}", icp_ledger);
@@ -189,12 +188,12 @@ async fn test_deposit_success() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_decimals - FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_1_decimals - FEE_ICP),
         )
         .add_call(
@@ -203,7 +202,7 @@ async fn test_deposit_success() {
             Ok(make_add_token_reply(
                 1,
                 "IC".to_string(),
-                sns_id,
+                sns_ledger,
                 "My DAO Token".to_string(),
                 "DAO".to_string(),
                 FEE_SNS,
@@ -231,26 +230,14 @@ async fn test_deposit_success() {
             ),
             Ok(make_add_pool_reply(&symbol_0, &symbol_1)),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             icp_ledger, // @todo
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(0_u64),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        );
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64));
 
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function

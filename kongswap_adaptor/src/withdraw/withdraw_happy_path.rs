@@ -16,7 +16,7 @@ use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, Balance, BalanceBook, Balances, DepositRequest, Step, TreasuryManager,
+    Allowance, Asset, BalanceBook, Balances, DepositRequest, Step, TreasuryManager,
     TreasuryManagerInit, TreasuryManagerOperation, WithdrawRequest,
 };
 use std::cell::RefCell;
@@ -28,6 +28,18 @@ use lazy_static::lazy_static;
 lazy_static! {
     static ref SELF_CANISTER_ID: Principal =
         Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
+    static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *SELF_CANISTER_ID);
+}
+
+lazy_static! {
+    static ref OWNER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: Principal::from_text("2vxsx-fae").unwrap(),
+        subaccount: None,
+    };
+    static ref MANAGER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: *SELF_CANISTER_ID,
+        subaccount: None,
+    };
 }
 
 fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
@@ -47,9 +59,9 @@ fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
     }
 }
 
-fn make_balance_request(self_id: Principal) -> Account {
+fn make_balance_request() -> Account {
     Account {
-        owner: self_id,
+        owner: *SELF_CANISTER_ID,
         subaccount: None,
     }
 }
@@ -212,13 +224,23 @@ fn make_add_pool_reply(token_0: &String, token_1: &String) -> AddPoolReply {
     }
 }
 
+fn make_default_balance_book() -> BalanceBook {
+    BalanceBook::empty()
+        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
+        .with_treasury_manager(*MANAGER_ACCOUNT, MANAGER_NAME.clone())
+        .with_external_custodian(None, None)
+        .with_suspense(None)
+        .with_fee_collector(None, None)
+        .with_payees(None, None)
+        .with_payers(None, None)
+}
+
 #[tokio::test]
 async fn test_withdraw_success() {
     const FEE_SNS: u64 = 10_500u64;
     const FEE_ICP: u64 = 9_500u64;
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
 
     let token_0 = format!("IC.{}", sns_ledger);
     let token_1 = format!("IC.{}", icp_ledger);
@@ -237,11 +259,6 @@ async fn test_withdraw_success() {
         ledger_canister_id: icp_ledger,
         symbol: symbol_1.clone(),
         ledger_fee_decimals: Nat::from(FEE_ICP),
-    };
-
-    let owner_account = sns_treasury_manager::Account {
-        owner: Principal::from_text("2vxsx-fae").unwrap(),
-        subaccount: None,
     };
 
     thread_local! {
@@ -276,13 +293,13 @@ async fn test_withdraw_success() {
         // SNS
         Allowance {
             asset: asset_0.clone(),
-            owner_account,
+            owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_0_decimals),
         },
         // ICP
         Allowance {
             asset: asset_1.clone(),
-            owner_account,
+            owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_1_decimals),
         },
     ];
@@ -300,12 +317,12 @@ async fn test_withdraw_success() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_decimals - FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_1_decimals - FEE_ICP),
         )
         .add_call(
@@ -314,7 +331,7 @@ async fn test_withdraw_success() {
             Ok(make_add_token_reply(
                 1,
                 "IC".to_string(),
-                sns_id,
+                sns_ledger,
                 "My DAO Token".to_string(),
                 "DAO".to_string(),
                 FEE_SNS,
@@ -342,26 +359,14 @@ async fn test_withdraw_success() {
             ),
             Ok(make_add_pool_reply(&symbol_0, &symbol_1)),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             icp_ledger, // @todo
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(0_u64),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_lp_balance_request(),
@@ -370,16 +375,8 @@ async fn test_withdraw_success() {
                 symbol_1.clone(),
             )]),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_remove_liquidity_request(symbol_0.clone(), symbol_1.clone(), 100 * E8),
@@ -395,22 +392,22 @@ async fn test_withdraw_success() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_decimals - 3 * FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_decimals - 3 * FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
@@ -422,19 +419,19 @@ async fn test_withdraw_success() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_decimals - 3 * FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
             sns_ledger,
             make_transfer_request(
                 Account {
-                    owner: owner_account.owner,
+                    owner: OWNER_ACCOUNT.owner,
                     subaccount: None,
                 },
                 FEE_SNS,
@@ -453,7 +450,7 @@ async fn test_withdraw_success() {
             icp_ledger,
             make_transfer_request(
                 Account {
-                    owner: owner_account.owner,
+                    owner: OWNER_ACCOUNT.owner,
                     subaccount: None,
                 },
                 FEE_ICP,
@@ -499,57 +496,13 @@ async fn test_withdraw_success() {
         let result_deposit = kong_adaptor.deposit(DepositRequest { allowances }).await;
 
         // Check the correctness of the balances after deposit
-        let mut asset_0_balance = BalanceBook::empty()
-            .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-            .with_treasury_manager(
-                sns_treasury_manager::Account {
-                    owner: kong_adaptor.id,
-                    subaccount: None,
-                },
-                format!("KongSwapAdaptor({})", kong_adaptor.id),
-            )
-            .with_external_custodian(None, None)
-            .with_suspense(None)
-            .with_fee_collector(None, None)
+        let asset_0_balance = make_default_balance_book()
             .fee_collector(2 * FEE_SNS)
             .external_custodian(amount_0_decimals - 2 * FEE_SNS);
 
-        asset_0_balance.payees = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
-        asset_0_balance.payers = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
-
-        let mut asset_1_balance = BalanceBook::empty()
-            .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-            .with_treasury_manager(
-                sns_treasury_manager::Account {
-                    owner: kong_adaptor.id,
-                    subaccount: None,
-                },
-                format!("KongSwapAdaptor({})", kong_adaptor.id),
-            )
-            .with_external_custodian(None, None)
-            .with_suspense(None)
-            .with_fee_collector(None, None)
+        let asset_1_balance = make_default_balance_book()
             .fee_collector(2 * FEE_ICP)
             .external_custodian(amount_1_decimals - 2 * FEE_ICP);
-
-        asset_1_balance.payees = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
-        asset_1_balance.payers = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
 
         let balances = Balances {
             timestamp_ns: 0,
@@ -581,57 +534,13 @@ async fn test_withdraw_success() {
             .await;
 
         // Check the correctness of the balances after withdrawal
-        let mut asset_0_balance = BalanceBook::empty()
-            .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-            .with_treasury_manager(
-                sns_treasury_manager::Account {
-                    owner: kong_adaptor.id,
-                    subaccount: None,
-                },
-                format!("KongSwapAdaptor({})", kong_adaptor.id),
-            )
-            .with_external_custodian(None, None)
-            .with_suspense(None)
-            .with_fee_collector(None, None)
+        let asset_0_balance = make_default_balance_book()
             .fee_collector(4 * FEE_SNS)
             .treasury_owner(amount_0_decimals - 4 * FEE_SNS);
 
-        asset_0_balance.payees = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
-        asset_0_balance.payers = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
-
-        let mut asset_1_balance = BalanceBook::empty()
-            .with_treasury_owner(owner_account, "DAO Treasury".to_string())
-            .with_treasury_manager(
-                sns_treasury_manager::Account {
-                    owner: kong_adaptor.id,
-                    subaccount: None,
-                },
-                format!("KongSwapAdaptor({})", kong_adaptor.id),
-            )
-            .with_external_custodian(None, None)
-            .with_suspense(None)
-            .with_fee_collector(None, None)
+        let asset_1_balance = make_default_balance_book()
             .fee_collector(4 * FEE_ICP)
             .treasury_owner(amount_1_decimals - 4 * FEE_ICP);
-
-        asset_1_balance.payees = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
-        asset_1_balance.payers = Some(Balance {
-            amount_decimals: 0_u64.into(),
-            account: None,
-            name: None,
-        });
 
         let balances = Balances {
             timestamp_ns: 0,

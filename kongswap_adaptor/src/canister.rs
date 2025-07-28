@@ -4,7 +4,7 @@ use crate::validation::{
 };
 use candid::Principal;
 use ic_canister_log::{declare_log_buffer, log};
-use ic_cdk::{init, post_upgrade, pre_upgrade, query, update};
+use ic_cdk::{init, inspect_message, post_upgrade, pre_upgrade, query, update};
 use ic_stable_structures::memory_manager::{MemoryId, MemoryManager, VirtualMemory};
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use kongswap_adaptor::agent::ic_cdk_agent::CdkAgent;
@@ -101,6 +101,19 @@ fn check_access() {
     }
 
     ic_cdk::trap("Only a controller can call this method.");
+}
+
+// Inspect the ingress messages in the pre-consensus phase and reject unauthorized access early.
+#[inspect_message]
+fn inspect_message() {
+    let method_name = ic_cdk::api::call::method_name();
+
+    // Queries can be called by anyone, even if they are called as updates.
+    if !["balances", "audit_trail"].contains(&method_name.as_str()) {
+        check_access();
+    }
+
+    ic_cdk::api::call::accept_message();
 }
 
 declare_log_buffer!(name = LOG, capacity = 100);
