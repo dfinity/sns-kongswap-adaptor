@@ -283,10 +283,12 @@ impl ValidatedBalances {
             return;
         };
 
-        if balance_after.abs_diff(balance_before) > asset.ledger_fee_decimals() + transferred_amount
-        {
-            balance_book.suspense += balance_before
-                .abs_diff(balance_after + asset.ledger_fee_decimals() + transferred_amount);
+        // On a happy deposit, the balance of the trasury manager
+        // should not change more than the expected amount. Otherwise,
+        // it means that by mistake more tokens than expected are
+        // transferred to the external.
+        if balance_after.abs_diff(balance_before) > transferred_amount {
+            balance_book.suspense += balance_before.abs_diff(balance_after) - transferred_amount;
         }
     }
 

@@ -3,6 +3,7 @@ use crate::{
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddPoolArgs,
     },
+    log_err,
     validation::{decode_nat_to_u64, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -116,12 +117,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
+        // @todo if we should subtract it
         let amount_0 = allowance_0
             .amount_decimals
             .saturating_sub(allowance_0.asset.ledger_fee_decimals());
-        // amount_1 is a function of amount_0.
-
-        // Step 4. Ensure the pool exists.
 
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
@@ -179,7 +178,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok((amount_0, amount_1))
     }
 
-    fn is_pool_already_deployed_error(&self, message: String) -> bool {
+    fn is_pool_already_deployed_error(&self, message: &String) -> bool {
         let lp_toke_symbol = self.lp_token();
 
         let tolerated_errors = [
@@ -187,7 +186,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             format!("Pool {} already exists", lp_toke_symbol),
         ];
 
-        tolerated_errors.contains(&message)
+        tolerated_errors.contains(message)
     }
 
     async fn deposit_into_dex(
@@ -212,20 +211,48 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         if let Err(Error {
             kind: ErrorKind::Backend {},
             message,
-            ..
+            code,
         }) = result
         {
-            if self.is_pool_already_deployed_error(message) {
+            if self.is_pool_already_deployed_error(&message) {
                 // If the pool already exists, we can proceed with a top-up. The allowances
                 // need to be updated with the amounts that were actually used.
                 (allowance_0.amount_decimals, allowance_1.amount_decimals) = self
                     .topup_pool(context, allowance_0, allowance_1)
                     .await
                     .map_err(|err| vec![err])?;
+            } else {
+                // It corresponds to a failed transfer from call.
+                let balances_after = self.get_ledger_balances(context).await?;
+
+                self.find_discrepency(
+                    allowance_0.asset,
+                    balances_before.0,
+                    balances_after.0,
+                    0,
+                    true,
+                );
+                self.find_discrepency(
+                    allowance_1.asset,
+                    balances_before.1,
+                    balances_after.1,
+                    0,
+                    true,
+                );
+
+                log_err(&format!(
+                    "Transferring one of the tokens from the manager to the DEX failed: {}",
+                    message
+                ));
+
+                return Err(vec![Error {
+                    kind: ErrorKind::Backend {},
+                    message,
+                    code,
+                }]);
             }
         }
 
-        // If pool wasn't deployed, funds are moved to the pool
         self.move_asset(
             allowance_0.asset,
             allowance_0.amount_decimals,
@@ -347,6 +374,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
     }
 }
+
+#[cfg(test)]
+mod deposit_add_pool;
+
+#[cfg(test)]
+mod test_failed_transfer_from;
 
 #[cfg(test)]
 mod deposit_happy_path;
