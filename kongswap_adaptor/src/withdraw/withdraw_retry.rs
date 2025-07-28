@@ -59,9 +59,9 @@ fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
     }
 }
 
-fn make_balance_request(self_id: Principal) -> Account {
+fn make_balance_request() -> Account {
     Account {
-        owner: self_id,
+        owner: *SELF_CANISTER_ID,
         subaccount: None,
     }
 }
@@ -206,7 +206,6 @@ async fn test_withdraw_retry() {
     const FEE_ICP: u64 = 9_500u64;
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-    let sns_id = Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
 
     let token_0 = format!("IC.{}", sns_ledger);
     let token_1 = format!("IC.{}", icp_ledger);
@@ -255,6 +254,9 @@ async fn test_withdraw_retry() {
 
     let amount_0_decimals = 500 * E8;
     let amount_1_decimals = 400 * E8;
+    // We are going to create a claim for the token 0
+    // with this amount. Upon a successful withdrawal
+    // it would be deducted from the DEX.
     let amount_0_retry = 100 * E8;
     let allowances = vec![
         // SNS
@@ -285,12 +287,12 @@ async fn test_withdraw_retry() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_decimals - FEE_SNS),
         )
         .add_call(
             icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_1_decimals - FEE_ICP),
         )
         .add_call(
@@ -299,7 +301,7 @@ async fn test_withdraw_retry() {
             Ok(make_add_token_reply(
                 1,
                 "IC".to_string(),
-                sns_id,
+                sns_ledger,
                 "My DAO Token".to_string(),
                 "DAO".to_string(),
                 FEE_SNS,
@@ -327,26 +329,14 @@ async fn test_withdraw_retry() {
             ),
             Ok(AddPoolReply::default()),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             icp_ledger, // @todo
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(0_u64),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        );
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64));
 
     // Add withdrawal calls
     mock_agent = mock_agent
@@ -359,16 +349,8 @@ async fn test_withdraw_retry() {
                 0.0,
             )]),
         )
-        .add_call(
-            sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             ClaimsArgs {
@@ -388,24 +370,16 @@ async fn test_withdraw_retry() {
         )
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_retry - FEE_SNS),
         )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             sns_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
+            make_balance_request(),
             Nat::from(amount_0_retry - FEE_SNS),
         )
-        .add_call(
-            icp_ledger,
-            make_balance_request(*SELF_CANISTER_ID),
-            Nat::from(0_u64),
-        )
+        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             sns_ledger,
             make_transfer_request(
@@ -493,7 +467,12 @@ async fn test_withdraw_retry() {
             })
             .await;
 
-        // Check the correctness of the balances after withdrawal
+        // Check the correctness of the balances after claiming a
+        // amount_0_retry from the DEX.
+        // By a successful retrial, this amount is removed from the DEX,
+        // and with a ledger transfer fee deducted from it(amount_0_retry - FEE_SNS)
+        // it land in the treasury manager. Then, when returning all the
+        // remaining assets to the owner, a second transfer fee would be deducted.
         let asset_0_balance = make_default_balance_book()
             .fee_collector(4 * FEE_SNS)
             .treasury_owner(amount_0_retry - 2 * FEE_SNS)
