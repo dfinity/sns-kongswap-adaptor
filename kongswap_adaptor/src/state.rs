@@ -218,19 +218,39 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .with_borrow_mut(|audit_trail| f(audit_trail))
     }
 
-    pub fn push_audit_trail_transaction(&self, transaction: StableTransaction) {
+    /// Returns the index of the pushed transaction in the audit trail, or None if the transaction
+    /// could not be pushed.
+    pub fn push_audit_trail_transaction(&self, transaction: StableTransaction) -> Option<u64> {
         self.with_audit_trail_mut(|audit_trail| {
+            let index = audit_trail.len();
             if let Err(err) = audit_trail.push(&transaction) {
                 log_err(&format!(
                     "Cannot push transaction to audit trail: {}\ntransaction: {:?}",
                     err, transaction
+                ));
+                None
+            } else {
+                Some(index)
+            }
+        })
+    }
+
+    pub fn set_audit_trail_transaction_result(&self, index: u64, transaction: StableTransaction) {
+        self.with_audit_trail_mut(|audit_trail| {
+            if index < audit_trail.len() {
+                audit_trail.set(index, &transaction);
+            } else {
+                log_err(&format!(
+                    "BUG: Invalid index {} for audit trail. Audit trail length: {}",
+                    index,
+                    audit_trail.len(),
                 ));
             }
         });
     }
 
     pub fn finalize_audit_trail_transaction(&self, context: OperationContext) {
-        let index_value = self.with_audit_trail(|audit_trail| {
+        let index_transaction = self.with_audit_trail(|audit_trail| {
             let num_transactions = audit_trail.len();
             audit_trail
                 .iter()
@@ -261,7 +281,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 })
         });
 
-        let Some((index, mut value)) = index_value else {
+        let Some((index, mut transaction)) = index_transaction else {
             log_err(&format!(
                 "Audit trail does not have an {} operation that could be finalized. \
                      Operation context: {:?}",
@@ -271,19 +291,9 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             return;
         };
 
-        value.operation.step.is_final = true;
+        transaction.operation.step.is_final = true;
 
-        self.with_audit_trail_mut(|audit_trail| {
-            if index < audit_trail.len() {
-                audit_trail.set(index, &value);
-            } else {
-                log_err(&format!(
-                    "BUG: Invalid index {} for audit trail. Audit trail length: {}",
-                    index,
-                    audit_trail.len(),
-                ));
-            }
-        });
+        self.set_audit_trail_transaction_result(index, transaction);
     }
 
     fn get_remaining_lock_duration_ns(&self) -> Option<u64> {
