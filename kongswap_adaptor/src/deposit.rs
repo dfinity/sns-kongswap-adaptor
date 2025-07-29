@@ -108,7 +108,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok((approved_amount_decimals_0, approved_amount_decimals_1))
     }
 
-    // In case of a success, this function returns how much
+    /// In case of a success, this function returns how much
     /// of each asset (including the transfer fee) is moved out.
     async fn topup_pool(
         &mut self,
