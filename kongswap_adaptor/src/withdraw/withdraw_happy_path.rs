@@ -1,8 +1,7 @@
 use super::*;
-use crate::kong_types::{
-    AddPoolArgs, AddPoolReply, AddTokenArgs, AddTokenReply, ICReply, UserBalanceLPReply,
-    UserBalancesArgs, UserBalancesReply,
-};
+use crate::balances::ValidatedBalanceBook;
+use crate::kong_types::{UserBalanceLPReply, UserBalancesArgs, UserBalancesReply};
+use crate::validation::ValidatedAsset;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
@@ -11,13 +10,12 @@ use candid::{Nat, Principal};
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use icrc_ledger_types::icrc1::transfer::{Memo, TransferArg};
-use icrc_ledger_types::icrc2::approve::ApproveArgs;
 use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, BalanceBook, Balances, DepositRequest, Step, TreasuryManager,
-    TreasuryManagerInit, TreasuryManagerOperation, WithdrawRequest,
+    Allowance, Asset, BalanceBook, Balances, Step, TreasuryManager, TreasuryManagerInit,
+    TreasuryManagerOperation, WithdrawRequest,
 };
 use std::cell::RefCell;
 
@@ -42,71 +40,10 @@ lazy_static! {
     };
 }
 
-fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
-    ApproveArgs {
-        from_subaccount: None,
-        spender: Account {
-            owner: *KONG_BACKEND_CANISTER_ID,
-            subaccount: None,
-        },
-        // All approved tokens should be fully used up before the next deposit.
-        amount: Nat::from(amount - fee),
-        expected_allowance: Some(Nat::from(0u8)),
-        expires_at: Some(u64::MAX),
-        memo: None,
-        created_at_time: None,
-        fee: Some(fee.into()),
-    }
-}
-
 fn make_balance_request() -> Account {
     Account {
         owner: *SELF_CANISTER_ID,
         subaccount: None,
-    }
-}
-
-fn make_add_token_request(token: String) -> AddTokenArgs {
-    AddTokenArgs { token }
-}
-
-fn make_add_token_reply(
-    token_id: u32,
-    chain: String,
-    canister_id: Principal,
-    name: String,
-    symbol: String,
-    fee: u64,
-) -> AddTokenReply {
-    AddTokenReply::IC(ICReply {
-        token_id,
-        chain,
-        canister_id: canister_id.to_string(),
-        name,
-        symbol,
-        decimals: 8,
-        fee: Nat::from(fee),
-        icrc1: true,
-        icrc2: true,
-        icrc3: true,
-        is_removed: false,
-    })
-}
-
-fn make_add_pool_request(
-    token_0: String,
-    amount_0: u64,
-    token_1: String,
-    amount_1: u64,
-) -> AddPoolArgs {
-    AddPoolArgs {
-        token_0,
-        amount_0: Nat::from(amount_0),
-        tx_id_0: None,
-        token_1,
-        amount_1: Nat::from(amount_1),
-        tx_id_1: None,
-        lp_fee_bps: Some(30),
     }
 }
 
@@ -196,34 +133,6 @@ fn make_transfer_request(
     }
 }
 
-fn make_add_pool_reply(token_0: &String, token_1: &String) -> AddPoolReply {
-    AddPoolReply {
-        tx_id: 0,
-        pool_id: 0,
-        request_id: 0,
-        status: "Success".to_string(),
-        name: String::default(),
-        symbol: String::default(),
-        chain_0: String::default(),
-        address_0: String::default(),
-        symbol_0: token_0.clone(),
-        amount_0: Nat::from(0_u64),
-        balance_0: Nat::from(0_u64),
-        chain_1: String::default(),
-        address_1: String::default(),
-        symbol_1: token_1.clone(),
-        amount_1: Nat::from(0_u64),
-        balance_1: Nat::from(0_u64),
-        lp_fee_bps: 0_u8,
-        lp_token_symbol: format!("{}_{}", token_0, token_1),
-        add_lp_token_amount: Nat::from(0_u64),
-        transfer_ids: vec![],
-        claim_ids: vec![],
-        is_removed: false,
-        ts: 0,
-    }
-}
-
 fn make_default_balance_book() -> BalanceBook {
     BalanceBook::empty()
         .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
@@ -235,15 +144,69 @@ fn make_default_balance_book() -> BalanceBook {
         .with_payers(None, None)
 }
 
+fn make_default_vallidated_balances(
+    asset_0: &Asset,
+    asset_1: &Asset,
+    asset_0_balance: BalanceBook,
+    asset_1_balance: BalanceBook,
+) -> ValidatedBalances {
+    ValidatedBalances {
+        timestamp_ns: 0,
+        asset_0: ValidatedAsset::try_from(asset_0.clone()).unwrap(),
+        asset_1: ValidatedAsset::try_from(asset_1.clone()).unwrap(),
+        asset_0_balance: ValidatedBalanceBook::try_from(asset_0_balance).unwrap(),
+        asset_1_balance: ValidatedBalanceBook::try_from(asset_1_balance).unwrap(),
+    }
+}
+
+impl TryFrom<BalanceBook> for ValidatedBalanceBook {
+    type Error = String;
+    fn try_from(value: BalanceBook) -> Result<Self, Self::Error> {
+        let mut errors = vec![];
+
+        if value.treasury_owner.is_none() {
+            errors.push("Missing treasury owner");
+        };
+
+        if value.treasury_manager.is_none() {
+            errors.push("Missing treasury manager");
+        }
+
+        if !errors.is_empty() {
+            return Err(errors.join(", "));
+        }
+
+        Ok(Self {
+            treasury_owner: value.treasury_owner.unwrap().try_into().unwrap(),
+            treasury_manager: value.treasury_manager.unwrap().try_into().unwrap(),
+            external: value.external_custodian.map_or(0, |balance| {
+                decode_nat_to_u64(balance.amount_decimals).unwrap_or(0)
+            }),
+            fee_collector: value.fee_collector.map_or(0, |balance| {
+                decode_nat_to_u64(balance.amount_decimals).unwrap_or(0)
+            }),
+            spendings: value.payees.map_or(0, |balance| {
+                decode_nat_to_u64(balance.amount_decimals).unwrap_or(0)
+            }),
+            earnings: value.payers.map_or(0, |balance| {
+                decode_nat_to_u64(balance.amount_decimals).unwrap_or(0)
+            }),
+            suspense: value.suspense.map_or(0, |balance| {
+                decode_nat_to_u64(balance.amount_decimals).unwrap_or(0)
+            }),
+        })
+    }
+}
+
 #[tokio::test]
 async fn test_withdraw_success() {
     const FEE_SNS: u64 = 10_500u64;
     const FEE_ICP: u64 = 9_500u64;
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
+
     let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-
-    let token_0 = format!("IC.{}", sns_ledger);
-    let token_1 = format!("IC.{}", icp_ledger);
 
     let symbol_0 = "DAO".to_string();
     let symbol_1 = "ICP".to_string();
@@ -270,10 +233,11 @@ async fn test_withdraw_success() {
                 RefCell::new(
                     StableCell::init(
                         memory_manager.borrow().get(BALANCES_MEMORY_ID),
-                        ConfigState::default()
+                        ConfigState::Uninitialized
                     )
                     .expect("BALANCES init should not cause errors")
                 )
+
             );
 
         static AUDIT_TRAIL: RefCell<StableAuditTrail> =
@@ -287,8 +251,6 @@ async fn test_withdraw_success() {
             );
     }
 
-    let amount_0_decimals = 500 * E8;
-    let amount_1_decimals = 400 * E8;
     let allowances = vec![
         // SNS
         Allowance {
@@ -305,68 +267,6 @@ async fn test_withdraw_success() {
     ];
 
     let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
-        .add_call(
-            sns_ledger,
-            make_approve_request(amount_0_decimals, FEE_SNS),
-            Ok(Nat::from(amount_0_decimals)),
-        )
-        .add_call(
-            icp_ledger,
-            make_approve_request(amount_1_decimals, FEE_ICP),
-            Ok(Nat::from(amount_1_decimals)),
-        )
-        .add_call(
-            sns_ledger,
-            make_balance_request(),
-            Nat::from(amount_0_decimals - FEE_SNS),
-        )
-        .add_call(
-            icp_ledger,
-            make_balance_request(),
-            Nat::from(amount_1_decimals - FEE_ICP),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_0.clone()),
-            Ok(make_add_token_reply(
-                1,
-                "IC".to_string(),
-                sns_ledger,
-                "My DAO Token".to_string(),
-                "DAO".to_string(),
-                FEE_SNS,
-            )),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_1.clone()),
-            Ok(make_add_token_reply(
-                2,
-                "IC".to_string(),
-                icp_ledger,
-                "Internet Computer".to_string(),
-                "ICP".to_string(),
-                FEE_ICP,
-            )),
-        )
-        .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            make_add_pool_request(
-                token_0.clone(),
-                amount_0_decimals - 2 * FEE_SNS,
-                token_1.clone(),
-                amount_1_decimals - 2 * FEE_ICP,
-            ),
-            Ok(make_add_pool_reply(&symbol_0, &symbol_1)),
-        )
-        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
-        .add_call(
-            icp_ledger, // @todo
-            make_balance_request(),
-            Nat::from(0_u64),
-        )
-        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
-        .add_call(icp_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_lp_balance_request(),
@@ -491,29 +391,25 @@ async fn test_withdraw_success() {
         allowance_1.owner_account,
     );
 
-    {
-        // This should now work without panicking
-        let result_deposit = kong_adaptor.deposit(DepositRequest { allowances }).await;
+    // We overwrite the balances to simulate the case after a
+    // happy deposit.
+    let asset_0_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
 
-        // Check the correctness of the balances after deposit
-        let asset_0_balance = make_default_balance_book()
-            .fee_collector(2 * FEE_SNS)
-            .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+    let asset_1_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
 
-        let asset_1_balance = make_default_balance_book()
-            .fee_collector(2 * FEE_ICP)
-            .external_custodian(amount_1_decimals - 2 * FEE_ICP);
+    BALANCES.with_borrow_mut(|balances| {
+        let validated_balances =
+            make_default_vallidated_balances(&asset_0, &asset_1, asset_0_balance, asset_1_balance);
 
-        let balances = Balances {
-            timestamp_ns: 0,
-            asset_to_balances: Some(btreemap! {
-                asset_0.clone() => asset_0_balance,
-                asset_1.clone() => asset_1_balance,
-            }),
-        };
-
-        assert_eq!(result_deposit, Ok(balances));
-    }
+        // println!("{:#?}", validated_balances);
+        balances
+            .set(ConfigState::Initialized(validated_balances))
+            .expect("Couldn't set the initial balances");
+    });
 
     {
         let withdraw_accounts = btreemap! {
