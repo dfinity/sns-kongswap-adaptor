@@ -30,6 +30,9 @@ mod tx_error_codes;
 mod validation;
 mod withdraw;
 
+#[cfg(test)]
+mod test_helper;
+
 const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
 pub(crate) type Memory = VirtualMemory<DefaultMemoryImpl>;

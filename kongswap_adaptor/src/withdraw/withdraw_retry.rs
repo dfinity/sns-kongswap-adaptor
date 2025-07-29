@@ -1,7 +1,5 @@
 use super::*;
-use crate::balances::ValidatedBalanceBook;
-use crate::kong_types::{UserBalanceLPReply, UserBalancesArgs, UserBalancesReply};
-use crate::validation::ValidatedAsset;
+use crate::test_helper::*;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
@@ -9,148 +7,14 @@ use crate::{
 use candid::{Nat, Principal};
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
-use icrc_ledger_types::icrc1::transfer::{Memo, TransferArg};
 use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, BalanceBook, Balances, Step, TreasuryManager, TreasuryManagerInit,
+    Allowance, Asset, Balances, Step, TreasuryManager, TreasuryManagerInit,
     TreasuryManagerOperation, WithdrawRequest,
 };
 use std::cell::RefCell;
-
-const E8: u64 = 100_000_000;
-
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref SELF_CANISTER_ID: Principal =
-        Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
-    static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *SELF_CANISTER_ID);
-}
-
-lazy_static! {
-    static ref OWNER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
-        owner: Principal::from_text("2vxsx-fae").unwrap(),
-        subaccount: None,
-    };
-    static ref MANAGER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
-        owner: *SELF_CANISTER_ID,
-        subaccount: None,
-    };
-}
-
-fn make_balance_request() -> Account {
-    Account {
-        owner: *SELF_CANISTER_ID,
-        subaccount: None,
-    }
-}
-
-fn make_lp_balance_request() -> UserBalancesArgs {
-    UserBalancesArgs {
-        principal_id: SELF_CANISTER_ID.to_string(),
-    }
-}
-
-fn make_lp_balance_reply(token_0: String, token_1: String, balance: f64) -> UserBalancesReply {
-    UserBalancesReply::LP(UserBalanceLPReply {
-        symbol: format!("{}_{}", token_0, token_1),
-        name: String::default(),
-        lp_token_id: 0,
-        balance,
-        usd_balance: 0.0,
-        chain_0: String::default(),
-        symbol_0: String::default(),
-        address_0: String::default(),
-        amount_0: 0.0,
-        usd_amount_0: 0.0,
-        chain_1: String::default(),
-        symbol_1: String::default(),
-        address_1: String::default(),
-        amount_1: 0.0,
-        usd_amount_1: 0.0,
-        ts: 0,
-    })
-}
-
-fn make_claims_reply(symbol_0: &String, symbol_1: &String) -> ClaimsReply {
-    ClaimsReply {
-        claim_id: 0,
-        status: "Failed".to_string(),
-        chain: "IC".to_string(),
-        symbol: format!("{}_{}", symbol_0, symbol_1),
-        canister_id: None,
-        amount: Nat::from(0_u64),
-        fee: Nat::from(0_u64),
-        to_address: "".to_string(),
-        desc: "".to_string(),
-        ts: 0,
-    }
-}
-
-fn make_claim_reply(
-    symbol_0: &String,
-    symbol_1: &String,
-    ledger_id: String,
-    amount: u64,
-) -> ClaimReply {
-    ClaimReply {
-        claim_id: 0,
-        status: "Success".to_string(),
-        chain: "IC".to_string(),
-        symbol: format!("{}_{}", symbol_0, symbol_1),
-        canister_id: Some(ledger_id),
-        amount: Nat::from(amount),
-        fee: Nat::from(0_u64),
-        to_address: "".to_string(),
-        desc: "".to_string(),
-        transfer_ids: vec![],
-        ts: 0,
-    }
-}
-
-fn make_transfer_request(
-    owner: Account,
-    fee: u64,
-    amount: u64,
-    operation: TreasuryManagerOperation,
-) -> TransferArg {
-    TransferArg {
-        from_subaccount: None,
-        to: owner,
-        fee: Some(Nat::from(fee)),
-        created_at_time: Some(0),
-        memo: Some(Memo::from(Vec::<u8>::from(operation))),
-        amount: Nat::from(amount - fee),
-    }
-}
-
-fn make_default_balance_book() -> BalanceBook {
-    BalanceBook::empty()
-        .with_treasury_owner(*OWNER_ACCOUNT, "DAO Treasury".to_string())
-        .with_treasury_manager(*MANAGER_ACCOUNT, MANAGER_NAME.clone())
-        .with_external_custodian(None, None)
-        .with_suspense(None)
-        .with_fee_collector(None, None)
-        .with_payees(None, None)
-        .with_payers(None, None)
-}
-
-fn make_default_vallidated_balances(
-    asset_0: &Asset,
-    asset_1: &Asset,
-    asset_0_balance: BalanceBook,
-    asset_1_balance: BalanceBook,
-) -> ValidatedBalances {
-    ValidatedBalances {
-        timestamp_ns: 0,
-        asset_0: ValidatedAsset::try_from(asset_0.clone()).unwrap(),
-        asset_1: ValidatedAsset::try_from(asset_1.clone()).unwrap(),
-        asset_0_balance: ValidatedBalanceBook::try_from(asset_0_balance).unwrap(),
-        asset_1_balance: ValidatedBalanceBook::try_from(asset_1_balance).unwrap(),
-    }
-}
 
 #[tokio::test]
 async fn test_withdraw_retry() {
@@ -321,9 +185,8 @@ async fn test_withdraw_retry() {
 
     BALANCES.with_borrow_mut(|balances| {
         let validated_balances =
-            make_default_vallidated_balances(&asset_0, &asset_1, asset_0_balance, asset_1_balance);
+            make_default_validated_balances(&asset_0, &asset_1, asset_0_balance, asset_1_balance);
 
-        // println!("{:#?}", validated_balances);
         balances
             .set(ConfigState::Initialized(validated_balances))
             .expect("Couldn't set the initial balances");
