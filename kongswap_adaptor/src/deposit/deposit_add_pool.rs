@@ -35,7 +35,7 @@ fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
         // All approved tokens should be fully used up before the next deposit.
         amount: Nat::from(amount - fee),
         expected_allowance: Some(Nat::from(0u8)),
-        expires_at: Some(u64::MAX),
+        expires_at: Some(3600000000000),
         memo: None,
         created_at_time: None,
         fee: Some(fee.into()),

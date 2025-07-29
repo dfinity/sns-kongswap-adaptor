@@ -52,7 +52,7 @@ fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
         // All approved tokens should be fully used up before the next deposit.
         amount: Nat::from(amount - fee),
         expected_allowance: Some(Nat::from(0u8)),
-        expires_at: Some(u64::MAX),
+        expires_at: Some(3600000000000),
         memo: None,
         created_at_time: None,
         fee: Some(fee.into()),
@@ -327,7 +327,10 @@ async fn test_withdraw_retry() {
                 token_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Ok(AddPoolReply::default()),
+            Ok(AddPoolReply {
+                status: "Success".to_string(),
+                ..Default::default()
+            }),
         )
         .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(

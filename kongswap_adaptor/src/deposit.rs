@@ -12,6 +12,9 @@ use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::{Error, ErrorKind};
 
+const NS_IN_SECOND: u64 = 1_000_000_000;
+const ONE_HOUR: u64 = 60 * 60 * NS_IN_SECOND;
+
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Enforces that each KongSwapAdaptor instance manages a single token pair.
     pub(crate) fn validate_deposit_args(
@@ -73,8 +76,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             // All approved tokens should be fully used up before the next deposit.
             amount,
             expected_allowance: Some(Nat::from(0u8)),
-            // TODO: Choose a more concervative expiration date.
-            expires_at: Some(u64::MAX),
+            expires_at: Some(self.time_ns() + ONE_HOUR),
             memo: None,
             created_at_time: None,
             fee,
