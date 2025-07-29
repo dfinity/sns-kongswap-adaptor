@@ -74,8 +74,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let balances_after = self.get_ledger_balances(context).await?;
 
         // TODO Unwrapping
-        let amount_0 = decode_nat_to_u64(amount_0 + lp_fee_0).unwrap();
-        let amount_1 = decode_nat_to_u64(amount_1 + lp_fee_1).unwrap();
+        let amount_0 = decode_nat_to_u64(amount_0)
+            .unwrap()
+            .saturating_add(decode_nat_to_u64(lp_fee_0).unwrap());
+        let amount_1 = decode_nat_to_u64(amount_1)
+            .unwrap()
+            .saturating_add(decode_nat_to_u64(lp_fee_1).unwrap());
 
         self.find_discrepency(
             asset_0,

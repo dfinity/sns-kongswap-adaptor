@@ -198,7 +198,10 @@ impl ValidatedBalances {
             return;
         };
 
-        balance_book.treasury_manager.amount_decimals += amount;
+        balance_book.treasury_manager.amount_decimals = balance_book
+            .treasury_manager
+            .amount_decimals
+            .saturating_add(amount);
     }
 
     // TODO[ATG]: Let's discuss this in detail.
@@ -224,24 +227,42 @@ impl ValidatedBalances {
 
         match (&from, &to) {
             (Party::External, Party::TreasuryManager) => {
-                balance_book.external -= amount;
-                balance_book.treasury_manager.amount_decimals +=
-                    amount - asset.ledger_fee_decimals();
+                balance_book.external = balance_book.external.saturating_sub(amount);
+                balance_book.treasury_manager.amount_decimals = balance_book
+                    .treasury_manager
+                    .amount_decimals
+                    .saturating_add(amount)
+                    .saturating_sub(asset.ledger_fee_decimals())
             }
             (Party::TreasuryManager, Party::TreasuryOwner) => {
-                balance_book.treasury_manager.amount_decimals -= amount;
-                balance_book.treasury_owner.amount_decimals += amount - asset.ledger_fee_decimals();
+                balance_book.treasury_manager.amount_decimals = balance_book
+                    .treasury_manager
+                    .amount_decimals
+                    .saturating_sub(amount);
+                balance_book.treasury_owner.amount_decimals = balance_book
+                    .treasury_owner
+                    .amount_decimals
+                    .saturating_add(amount)
+                    .saturating_sub(asset.ledger_fee_decimals());
             }
             (Party::TreasuryManager, Party::External) => {
-                balance_book.external += amount - asset.ledger_fee_decimals();
-                balance_book.treasury_manager.amount_decimals -= amount;
+                balance_book.treasury_manager.amount_decimals = balance_book
+                    .treasury_manager
+                    .amount_decimals
+                    .saturating_sub(amount);
+                balance_book.external = balance_book
+                    .external
+                    .saturating_add(amount)
+                    .saturating_sub(asset.ledger_fee_decimals());
             }
             _ => {
                 log_err(&format!("Invalid asset movement from {} to {}", from, to));
             }
         }
 
-        balance_book.fee_collector += asset.ledger_fee_decimals();
+        balance_book.fee_collector = balance_book
+            .fee_collector
+            .saturating_add(asset.ledger_fee_decimals());
     }
 
     pub(crate) fn charge_fee(&mut self, asset: ValidatedAsset) {
@@ -259,8 +280,11 @@ impl ValidatedBalances {
         };
 
         let fee = asset.ledger_fee_decimals();
-        balance_book.fee_collector += fee;
-        balance_book.treasury_manager.amount_decimals -= fee;
+        balance_book.fee_collector = balance_book.fee_collector.saturating_add(fee);
+        balance_book.treasury_manager.amount_decimals = balance_book
+            .treasury_manager
+            .amount_decimals
+            .saturating_sub(fee);
     }
 
     pub(crate) fn find_deposit_discrepency(
@@ -288,7 +312,10 @@ impl ValidatedBalances {
         // it means that by mistake more tokens than expected are
         // transferred to the external.
         if balance_after.abs_diff(balance_before) > transferred_amount {
-            balance_book.suspense += balance_before.abs_diff(balance_after) - transferred_amount;
+            balance_book.suspense = balance_book
+                .suspense
+                .saturating_add(balance_before.abs_diff(balance_after))
+                .saturating_sub(transferred_amount);
         }
     }
 
@@ -312,10 +339,15 @@ impl ValidatedBalances {
             return;
         };
 
-        if balance_after.abs_diff(balance_before) < transferred_amount - asset.ledger_fee_decimals()
+        if balance_after.abs_diff(balance_before)
+            < transferred_amount.saturating_sub(asset.ledger_fee_decimals())
         {
-            balance_book.suspense += balance_after
-                .abs_diff(balance_before + transferred_amount - asset.ledger_fee_decimals());
+            balance_book.suspense = balance_book
+                .suspense
+                .saturating_add(balance_before)
+                .saturating_sub(balance_after)
+                .saturating_add(transferred_amount)
+                .saturating_sub(asset.ledger_fee_decimals());
         }
     }
 }
