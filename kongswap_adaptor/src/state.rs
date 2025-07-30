@@ -1,6 +1,7 @@
 use crate::{
     balances::{Party, ValidatedBalances},
     log_err,
+    logged_arithmetics::{logged_saturating_add, logged_saturating_sub},
     state::storage::{ConfigState, StableTransaction},
     validation::ValidatedAsset,
     StableAuditTrail, StableBalances,
@@ -149,7 +150,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     }
 
     pub fn charge_fee(&mut self, asset: ValidatedAsset) {
-        self.with_balances_mut(|validated_balances| validated_balances.charge_fee(asset));
+        self.with_balances_mut(|validated_balances| validated_balances.charge_approval_fee(asset));
     }
 
     pub fn get_asset_for_ledger(&self, canister_id: &String) -> Option<ValidatedAsset> {
@@ -272,7 +273,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                                 return None;
                             }
                         };
-                        let index = num_transactions.saturating_sub(1).saturating_sub(rev_index);
+                        let index = logged_saturating_sub(
+                            num_transactions,
+                            logged_saturating_add(rev_index, 1),
+                        );
 
                         Some((index, transaction.clone()))
                     } else {
@@ -318,14 +322,15 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         }
 
         let acquired_timestamp_ns = transaction.timestamp_ns;
-        let expiry_timestamp_ns = acquired_timestamp_ns.saturating_add(MAX_LOCK_DURATION_NS);
+        let expiry_timestamp_ns =
+            logged_saturating_add(acquired_timestamp_ns, MAX_LOCK_DURATION_NS);
 
         if now_ns > expiry_timestamp_ns {
             log_err(&format!("Transaction lock expired: {:?}", transaction));
             return None;
         }
 
-        Some(expiry_timestamp_ns.saturating_sub(now_ns))
+        Some(logged_saturating_sub(expiry_timestamp_ns, now_ns))
     }
 
     /// Checks if the last transaction has been finalized, or if its lock has expired.

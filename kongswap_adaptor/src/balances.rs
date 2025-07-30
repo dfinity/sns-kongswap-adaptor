@@ -3,6 +3,7 @@ use std::fmt::Display;
 use crate::{
     kong_types::{RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, UpdateTokenArgs},
     log, log_err,
+    logged_arithmetics::{logged_saturating_add, logged_saturating_sub},
     tx_error_codes::TransactionErrorCodes,
     validation::{decode_nat_to_u64, ValidatedAsset, ValidatedBalance, ValidatedSymbol},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
@@ -198,13 +199,10 @@ impl ValidatedBalances {
             return;
         };
 
-        balance_book.treasury_manager.amount_decimals = balance_book
-            .treasury_manager
-            .amount_decimals
-            .saturating_add(amount);
+        balance_book.treasury_manager.amount_decimals =
+            logged_saturating_add(balance_book.treasury_manager.amount_decimals, amount);
     }
 
-    // TODO[ATG]: Let's discuss this in detail.
     pub(crate) fn move_asset(
         &mut self,
         asset: ValidatedAsset,
@@ -227,45 +225,38 @@ impl ValidatedBalances {
 
         match (&from, &to) {
             (Party::External, Party::TreasuryManager) => {
-                balance_book.external = balance_book.external.saturating_sub(amount);
-                balance_book.treasury_manager.amount_decimals = balance_book
-                    .treasury_manager
-                    .amount_decimals
-                    .saturating_add(amount)
-                    .saturating_sub(asset.ledger_fee_decimals())
+                balance_book.external = logged_saturating_sub(balance_book.external, amount);
+                balance_book.treasury_manager.amount_decimals = logged_saturating_add(
+                    balance_book.treasury_manager.amount_decimals,
+                    logged_saturating_sub(amount, asset.ledger_fee_decimals()),
+                );
             }
             (Party::TreasuryManager, Party::TreasuryOwner) => {
-                balance_book.treasury_manager.amount_decimals = balance_book
-                    .treasury_manager
-                    .amount_decimals
-                    .saturating_sub(amount);
-                balance_book.treasury_owner.amount_decimals = balance_book
-                    .treasury_owner
-                    .amount_decimals
-                    .saturating_add(amount)
-                    .saturating_sub(asset.ledger_fee_decimals());
+                balance_book.treasury_manager.amount_decimals =
+                    logged_saturating_sub(balance_book.treasury_manager.amount_decimals, amount);
+                balance_book.treasury_owner.amount_decimals = logged_saturating_add(
+                    balance_book.treasury_owner.amount_decimals,
+                    logged_saturating_sub(amount, asset.ledger_fee_decimals()),
+                );
             }
             (Party::TreasuryManager, Party::External) => {
-                balance_book.treasury_manager.amount_decimals = balance_book
-                    .treasury_manager
-                    .amount_decimals
-                    .saturating_sub(amount);
-                balance_book.external = balance_book
-                    .external
-                    .saturating_add(amount)
-                    .saturating_sub(asset.ledger_fee_decimals());
+                balance_book.treasury_manager.amount_decimals =
+                    logged_saturating_sub(balance_book.treasury_manager.amount_decimals, amount);
+                balance_book.external = logged_saturating_add(
+                    balance_book.external,
+                    logged_saturating_sub(amount, asset.ledger_fee_decimals()),
+                );
             }
             _ => {
                 log_err(&format!("Invalid asset movement from {} to {}", from, to));
             }
         }
 
-        balance_book.fee_collector = balance_book
-            .fee_collector
-            .saturating_add(asset.ledger_fee_decimals());
+        balance_book.fee_collector =
+            logged_saturating_add(balance_book.fee_collector, asset.ledger_fee_decimals());
     }
 
-    pub(crate) fn charge_fee(&mut self, asset: ValidatedAsset) {
+    pub(crate) fn charge_approval_fee(&mut self, asset: ValidatedAsset) {
         let balance_book = if asset == self.asset_0 {
             &mut self.asset_0_balance
         } else if asset == self.asset_1 {
@@ -280,11 +271,9 @@ impl ValidatedBalances {
         };
 
         let fee = asset.ledger_fee_decimals();
-        balance_book.fee_collector = balance_book.fee_collector.saturating_add(fee);
-        balance_book.treasury_manager.amount_decimals = balance_book
-            .treasury_manager
-            .amount_decimals
-            .saturating_sub(fee);
+        balance_book.fee_collector = logged_saturating_add(balance_book.fee_collector, fee);
+        balance_book.treasury_manager.amount_decimals =
+            logged_saturating_sub(balance_book.treasury_manager.amount_decimals, fee);
     }
 
     pub(crate) fn find_deposit_discrepency(
@@ -311,14 +300,18 @@ impl ValidatedBalances {
         // should not change more than the expected amount. Otherwise,
         // it means that by mistake more tokens than expected are
         // transferred to the external.
-        if balance_after.abs_diff(balance_before) > transferred_amount {
-            balance_book.suspense = balance_book
-                .suspense
-                .saturating_add(balance_before.abs_diff(balance_after))
-                .saturating_sub(transferred_amount);
+        let manager_balance_delta = logged_saturating_sub(balance_before, balance_after);
+        if manager_balance_delta > transferred_amount {
+            balance_book.suspense = logged_saturating_add(
+                balance_book.suspense,
+                logged_saturating_sub(manager_balance_delta, transferred_amount),
+            );
         }
     }
 
+    // transferred_amount is the amount withdrawn from the external.
+    // Which means the amount received by the manager should be:
+    // transferred_amount - ledger fee
     pub(crate) fn find_withdraw_discrepency(
         &mut self,
         asset: ValidatedAsset,
@@ -339,15 +332,14 @@ impl ValidatedBalances {
             return;
         };
 
-        if balance_after.abs_diff(balance_before)
-            < transferred_amount.saturating_sub(asset.ledger_fee_decimals())
-        {
-            balance_book.suspense = balance_book
-                .suspense
-                .saturating_add(balance_before)
-                .saturating_sub(balance_after)
-                .saturating_add(transferred_amount)
-                .saturating_sub(asset.ledger_fee_decimals());
+        let manager_balance_delta = logged_saturating_sub(balance_after, balance_before);
+        let expected_received_amount =
+            logged_saturating_sub(transferred_amount, asset.ledger_fee_decimals());
+        if manager_balance_delta < expected_received_amount {
+            balance_book.suspense = logged_saturating_add(
+                balance_book.suspense,
+                logged_saturating_sub(expected_received_amount, manager_balance_delta),
+            );
         }
     }
 }
