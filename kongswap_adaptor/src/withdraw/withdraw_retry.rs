@@ -327,7 +327,10 @@ async fn test_withdraw_retry() {
                 token_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Ok(AddPoolReply::default()),
+            Ok(AddPoolReply {
+                status: "Success".to_string(),
+                ..Default::default()
+            }),
         )
         .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
         .add_call(
