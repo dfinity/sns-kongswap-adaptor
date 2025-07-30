@@ -20,6 +20,7 @@ use crate::{
     KONG_BACKEND_CANISTER_ID,
 };
 
+// Represents 10^8, commonly used for 8-decimal token amounts.
 pub(crate) const E8: u64 = 100_000_000;
 pub(crate) const FEE_SNS: u64 = 10_500u64;
 pub(crate) const FEE_ICP: u64 = 9_500u64;
