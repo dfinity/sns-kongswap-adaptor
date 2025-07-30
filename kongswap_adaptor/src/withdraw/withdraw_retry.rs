@@ -152,6 +152,8 @@ fn make_default_vallidated_balances(
     }
 }
 
+// This test simulates the case, where a withdrawal has previously failed.
+// This test shows that users can claim their failed withdrawals.
 #[tokio::test]
 async fn test_withdraw_retry() {
     const FEE_SNS: u64 = 10_500u64;
