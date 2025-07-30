@@ -24,6 +24,7 @@ mod emit_transaction;
 mod kong_api;
 mod kong_types;
 mod ledger_api;
+mod logged_arithmetics;
 mod rewards;
 mod state;
 mod tx_error_codes;

@@ -4,6 +4,7 @@ use crate::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddPoolArgs,
     },
     log_err,
+    logged_arithmetics::logged_saturating_sub,
     validation::{decode_nat_to_u64, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -108,6 +109,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok((approved_amount_decimals_0, approved_amount_decimals_1))
     }
 
+    /// In case of a success, this function returns how much
+    /// of each asset (including the transfer fee) is moved out.
     async fn topup_pool(
         &mut self,
         context: &mut OperationContext,
@@ -117,10 +120,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
-        // @todo if we should subtract it
-        let amount_0 = allowance_0
-            .amount_decimals
-            .saturating_sub(allowance_0.asset.ledger_fee_decimals());
+        let amount_0 = logged_saturating_sub(
+            allowance_0.amount_decimals,
+            allowance_0.asset.ledger_fee_decimals(),
+        );
 
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
@@ -175,7 +178,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let amount_1 = decode_nat_to_u64(amount_1).map_err(Error::new_postcondition)?;
 
-        Ok((amount_0, amount_1))
+        // We return the whole amount that was paid by the treasury manager:
+        // the transferred amount to the external + the transfer fee paid for it.
+        Ok((
+            amount_0 + allowance_0.asset.ledger_fee_decimals(),
+            amount_1 + allowance_1.asset.ledger_fee_decimals(),
+        ))
     }
 
     fn is_pool_already_deployed_error(&self, message: &String) -> bool {
@@ -296,16 +304,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
         // Adjust the amounts to take the fees into account.
-        let amount_0 = Nat::from(
-            allowance_0
-                .amount_decimals
-                .saturating_sub(allowance_0.asset.ledger_fee_decimals()),
-        );
-        let amount_1 = Nat::from(
-            allowance_1
-                .amount_decimals
-                .saturating_sub(allowance_1.asset.ledger_fee_decimals()),
-        );
+        let amount_0 = Nat::from(logged_saturating_sub(
+            allowance_0.amount_decimals,
+            allowance_0.asset.ledger_fee_decimals(),
+        ));
+        let amount_1 = Nat::from(logged_saturating_sub(
+            allowance_1.amount_decimals,
+            allowance_1.asset.ledger_fee_decimals(),
+        ));
         // Step 1. Ensure the tokens are registered with the DEX.
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.
@@ -376,10 +382,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 }
 
 #[cfg(test)]
-mod deposit_add_pool;
+mod test_failed_transfer_from;
 
 #[cfg(test)]
-mod test_failed_transfer_from;
+mod deposit_add_liquidity;
 
 #[cfg(test)]
 mod deposit_happy_path;

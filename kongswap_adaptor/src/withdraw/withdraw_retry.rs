@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_helper::*;
+use crate::test_helpers::*;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
