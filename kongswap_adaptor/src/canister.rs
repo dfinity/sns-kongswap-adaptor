@@ -31,7 +31,7 @@ mod validation;
 mod withdraw;
 
 #[cfg(test)]
-mod test_helper;
+mod test_helpers;
 
 const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
