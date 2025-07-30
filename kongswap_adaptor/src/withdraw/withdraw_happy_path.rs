@@ -405,7 +405,6 @@ async fn test_withdraw_success() {
         let validated_balances =
             make_default_vallidated_balances(&asset_0, &asset_1, asset_0_balance, asset_1_balance);
 
-        // println!("{:#?}", validated_balances);
         balances
             .set(ConfigState::Initialized(validated_balances))
             .expect("Couldn't set the initial balances");
