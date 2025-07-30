@@ -13,7 +13,7 @@ use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::{Error, ErrorKind};
 
 const NS_IN_SECOND: u64 = 1_000_000_000;
-const ONE_HOUR: u64 = 60 * 60 * NS_IN_SECOND;
+pub(crate) const ONE_HOUR: u64 = 60 * 60 * NS_IN_SECOND;
 
 impl<A: AbstractAgent> KongSwapAdaptor<A> {
     /// Enforces that each KongSwapAdaptor instance manages a single token pair.
