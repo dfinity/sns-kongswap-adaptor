@@ -176,7 +176,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let amount_1 = decode_nat_to_u64(amount_1).map_err(Error::new_postcondition)?;
 
-        // @todo if we should use the fee field in the response instead
+        // We return the whole amount that was paid by the treasury manager:
+        // the transferred amount to the external + the transfer fee paid for it.
         Ok((
             amount_0 + allowance_0.asset.ledger_fee_decimals(),
             amount_1 + allowance_1.asset.ledger_fee_decimals(),

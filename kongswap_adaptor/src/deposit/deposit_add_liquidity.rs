@@ -177,7 +177,7 @@ fn make_add_liquidity_reply(
         address_1: "".to_string(),
         symbol_1: symbol_1.to_string(),
         amount_1: Nat::from(amount_1),
-        add_lp_token_amount: Nat::from(amount_0 + amount_1), // Just a random number
+        add_lp_token_amount: Nat::from(amount_0 + amount_1), // As we are not using this value, it doesn't matter. It a separate PR, will use Default for the unused fields.
         transfer_ids: vec![],
         claim_ids: vec![],
         ts: 0,
