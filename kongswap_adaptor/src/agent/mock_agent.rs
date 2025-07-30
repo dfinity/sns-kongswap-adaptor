@@ -31,7 +31,6 @@ impl Display for MockError {
 
 impl Error for MockError {}
 
-// TODO use Result to store reply and failure
 struct CallSpec {
     raw_request: Vec<u8>,
     raw_response: Vec<u8>,

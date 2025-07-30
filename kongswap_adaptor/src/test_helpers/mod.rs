@@ -12,6 +12,7 @@ use sns_treasury_manager::{Asset, BalanceBook, TreasuryManagerOperation};
 use crate::{
     balances::{ValidatedBalanceBook, ValidatedBalances},
     kong_types::{
+        AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply, AddTokenArgs, AddTokenReply, ClaimReply, ClaimsReply, ICReply,
         RemoveLiquidityArgs, RemoveLiquidityReply, UserBalanceLPReply, UserBalancesArgs,
         UserBalancesReply,
@@ -24,6 +25,10 @@ use crate::{
 pub(crate) const E8: u64 = 100_000_000;
 pub(crate) const FEE_SNS: u64 = 10_500u64;
 pub(crate) const FEE_ICP: u64 = 9_500u64;
+
+pub(crate) const IC: &'static str = "IC";
+pub(crate) const SUCCESS_STATUS: &'static str = "Success";
+pub(crate) const FAILURE_STATUS: &'static str = "Failed";
 
 lazy_static! {
     pub(crate) static ref SELF_CANISTER_ID: Principal =
@@ -57,6 +62,7 @@ lazy_static! {
         symbol: SYMBOL_1.clone(),
         ledger_fee_decimals: Nat::from(FEE_ICP),
     };
+
 }
 
 pub(crate) fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
@@ -129,29 +135,11 @@ pub(crate) fn make_add_pool_request(
 
 pub(crate) fn make_add_pool_reply(token_0: &String, token_1: &String) -> AddPoolReply {
     AddPoolReply {
-        tx_id: 0,
-        pool_id: 0,
-        request_id: 0,
-        status: "Success".to_string(),
-        name: String::default(),
-        symbol: String::default(),
-        chain_0: String::default(),
-        address_0: String::default(),
+        status: SUCCESS_STATUS.to_string(),
         symbol_0: token_0.clone(),
-        amount_0: Nat::from(0_u64),
-        balance_0: Nat::from(0_u64),
-        chain_1: String::default(),
-        address_1: String::default(),
         symbol_1: token_1.clone(),
-        amount_1: Nat::from(0_u64),
-        balance_1: Nat::from(0_u64),
-        lp_fee_bps: 0_u8,
         lp_token_symbol: format!("{}_{}", token_0, token_1),
-        add_lp_token_amount: Nat::from(0_u64),
-        transfer_ids: vec![],
-        claim_ids: vec![],
-        is_removed: false,
-        ts: 0,
+        ..Default::default()
     }
 }
 
@@ -195,36 +183,17 @@ pub(crate) fn make_lp_balance_reply(
 ) -> UserBalancesReply {
     UserBalancesReply::LP(UserBalanceLPReply {
         symbol: format!("{}_{}", token_0, token_1),
-        name: String::default(),
-        lp_token_id: 0,
         balance,
-        usd_balance: 0.0,
-        chain_0: String::default(),
-        symbol_0: String::default(),
-        address_0: String::default(),
-        amount_0: 0.0,
-        usd_amount_0: 0.0,
-        chain_1: String::default(),
-        symbol_1: String::default(),
-        address_1: String::default(),
-        amount_1: 0.0,
-        usd_amount_1: 0.0,
-        ts: 0,
+        ..Default::default()
     })
 }
 
 pub(crate) fn make_claims_reply(symbol_0: &String, symbol_1: &String) -> ClaimsReply {
     ClaimsReply {
-        claim_id: 0,
-        status: "Failed".to_string(),
-        chain: "IC".to_string(),
+        status: FAILURE_STATUS.to_string(),
+        chain: IC.to_string(),
         symbol: format!("{}_{}", symbol_0, symbol_1),
-        canister_id: None,
-        amount: Nat::from(0_u64),
-        fee: Nat::from(0_u64),
-        to_address: "".to_string(),
-        desc: "".to_string(),
-        ts: 0,
+        ..Default::default()
     }
 }
 
@@ -235,17 +204,12 @@ pub(crate) fn make_claim_reply(
     amount: u64,
 ) -> ClaimReply {
     ClaimReply {
-        claim_id: 0,
-        status: "Success".to_string(),
-        chain: "IC".to_string(),
+        status: SUCCESS_STATUS.to_string(),
+        chain: IC.to_string(),
         symbol: format!("{}_{}", symbol_0, symbol_1),
         canister_id: Some(ledger_id),
         amount: Nat::from(amount),
-        fee: Nat::from(0_u64),
-        to_address: "".to_string(),
-        desc: "".to_string(),
-        transfer_ids: vec![],
-        ts: 0,
+        ..Default::default()
     }
 }
 
@@ -271,24 +235,16 @@ pub(crate) fn make_remove_liquidity_reply(
     remove_lp_token_amount: u64,
 ) -> RemoveLiquidityReply {
     RemoveLiquidityReply {
-        tx_id: 0,
-        request_id: 0,
-        status: "Success".to_string(),
+        status: SUCCESS_STATUS.to_string(),
         symbol: format!("{}_{}", token_0, token_1),
-        chain_0: String::default(),
-        address_0: String::default(),
         symbol_0: token_0.clone(),
         amount_0: Nat::from(amount_0),
         lp_fee_0: Nat::from(lp_fee_0),
-        chain_1: String::default(),
-        address_1: String::default(),
         symbol_1: token_1.clone(),
         amount_1: Nat::from(amount_1),
         lp_fee_1: Nat::from(lp_fee_1),
         remove_lp_token_amount: Nat::from(remove_lp_token_amount),
-        transfer_ids: vec![],
-        claim_ids: vec![],
-        ts: 0,
+        ..Default::default()
     }
 }
 
@@ -343,5 +299,64 @@ impl TryFrom<BalanceBook> for ValidatedBalanceBook {
                 decode_nat_to_u64(balance.amount_decimals).unwrap_or(0)
             }),
         })
+    }
+}
+
+pub(crate) fn make_add_liquidity_amounts_request(
+    amount: u64,
+    token_0: String,
+    token_1: String,
+) -> AddLiquidityAmountsArgs {
+    AddLiquidityAmountsArgs {
+        amount: Nat::from(amount),
+        token_0,
+        token_1,
+    }
+}
+
+pub(crate) fn make_add_liquidity_amounts_reply(
+    amount_0: u64,
+    amount_1: u64,
+    symbol_0: &String,
+    symbol_1: &String,
+) -> AddLiquidityAmountsReply {
+    AddLiquidityAmountsReply {
+        symbol_0: symbol_0.to_string(),
+        amount_0: Nat::from(amount_0),
+        symbol_1: symbol_1.to_string(),
+        amount_1: Nat::from(amount_1),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn make_add_liquidity_request(
+    amount_0: u64,
+    amount_1: u64,
+    token_0: &String,
+    token_1: &String,
+) -> AddLiquidityArgs {
+    AddLiquidityArgs {
+        token_0: token_0.to_string(),
+        amount_0: Nat::from(amount_0),
+        tx_id_0: None,
+        token_1: token_1.to_string(),
+        amount_1: Nat::from(amount_1),
+        tx_id_1: None,
+    }
+}
+
+pub(crate) fn make_add_liquidity_reply(
+    amount_0: u64,
+    amount_1: u64,
+    symbol_0: &String,
+    symbol_1: &String,
+) -> AddLiquidityReply {
+    AddLiquidityReply {
+        status: SUCCESS_STATUS.to_string(),
+        symbol_0: symbol_0.to_string(),
+        amount_0: Nat::from(amount_0),
+        symbol_1: symbol_1.to_string(),
+        amount_1: Nat::from(amount_1),
+        ..Default::default()
     }
 }
