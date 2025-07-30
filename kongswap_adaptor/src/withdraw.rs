@@ -3,6 +3,7 @@ use crate::{
     kong_types::{
         ClaimArgs, ClaimReply, ClaimsArgs, ClaimsReply, RemoveLiquidityArgs, RemoveLiquidityReply,
     },
+    log_err,
     logged_arithmetics::logged_saturating_add,
     tx_error_codes::TransactionErrorCodes,
     validation::decode_nat_to_u64,
@@ -74,15 +75,25 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let balances_after = self.get_ledger_balances(context).await?;
 
-        // TODO Unwrapping
-        let amount_0 = logged_saturating_add(
-            decode_nat_to_u64(amount_0).unwrap(),
-            decode_nat_to_u64(lp_fee_0).unwrap(),
-        );
-        let amount_1 = logged_saturating_add(
-            decode_nat_to_u64(amount_1).unwrap(),
-            decode_nat_to_u64(lp_fee_1).unwrap(),
-        );
+        let amount_0 = decode_nat_to_u64(amount_0.clone()).unwrap_or_else(|_| {
+            log_err(&format!("amount {:?} is not u64-decodable", amount_0));
+            0
+        });
+        let amount_1 = decode_nat_to_u64(amount_1.clone()).unwrap_or_else(|_| {
+            log_err(&format!("amount {:?} is not u64-decodable", amount_1));
+            0
+        });
+        let lp_fee_0 = decode_nat_to_u64(lp_fee_0.clone()).unwrap_or_else(|_| {
+            log_err(&format!("lp_fee_0 {:?} is not u64-decodable", lp_fee_0));
+            0
+        });
+        let lp_fee_1 = decode_nat_to_u64(lp_fee_1.clone()).unwrap_or_else(|_| {
+            log_err(&format!("lp_fee_1 {:?} is not u64-decodable", lp_fee_1));
+            0
+        });
+
+        let amount_0 = logged_saturating_add(amount_0, lp_fee_0);
+        let amount_1 = logged_saturating_add(amount_1, lp_fee_1);
 
         self.find_discrepency(
             asset_0,
@@ -236,7 +247,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 }
 
 #[cfg(test)]
-mod withdraw_happy_path;
+mod test_withdraw_happy_path;
 
 #[cfg(test)]
-mod withdraw_retry;
+mod test_withdraw_retry;

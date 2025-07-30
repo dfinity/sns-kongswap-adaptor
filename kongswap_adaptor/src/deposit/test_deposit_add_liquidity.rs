@@ -10,15 +10,64 @@ use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Balances, DepositRequest, TreasuryManager, TreasuryManagerInit,
+    Allowance, BalanceBook, Balances, DepositRequest, Step, TreasuryManager, TreasuryManagerInit,
+    TreasuryManagerOperation,
 };
 use std::cell::RefCell;
 
 #[tokio::test]
-async fn test_deposit_success() {
+async fn test_add_liquidity() {
     let amount_0_decimals = 500 * E8;
     let amount_1_decimals = 400 * E8;
 
+    let asset_0_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+    let asset_1_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
+
+    run_add_liquidity_test(
+        amount_0_decimals,
+        amount_1_decimals,
+        0,
+        asset_0_balance,
+        asset_1_balance,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_add_liquidity_unproportional() {
+    let amount_0_decimals = 500 * E8;
+    let amount_1_decimals = 400 * E8;
+    let amount_1_remaining = 100 * E8;
+
+    let asset_0_balance = make_default_balance_book()
+        .fee_collector(2 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+    let asset_1_balance = make_default_balance_book()
+        .fee_collector(3 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 2 * FEE_ICP - amount_1_remaining)
+        .treasury_owner(amount_1_remaining - FEE_ICP);
+
+    run_add_liquidity_test(
+        amount_0_decimals,
+        amount_1_decimals,
+        amount_1_remaining,
+        asset_0_balance,
+        asset_1_balance,
+    )
+    .await;
+}
+
+async fn run_add_liquidity_test(
+    amount_0_decimals: u64,
+    amount_1_decimals: u64,
+    amount_1_remaining: u64,
+    asset_0_balance: BalanceBook,
+    asset_1_balance: BalanceBook,
+) {
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
             RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -60,7 +109,7 @@ async fn test_deposit_success() {
         },
     ];
 
-    let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
+    let mut mock_agent = MockAgent::new(*SELF_CANISTER_ID)
         .add_call(
             *SNS_LEDGER,
             make_approve_request(amount_0_decimals, FEE_SNS),
@@ -113,16 +162,76 @@ async fn test_deposit_success() {
                 TOKEN_1.clone(),
                 amount_1_decimals - 2 * FEE_ICP,
             ),
-            Ok(make_add_pool_reply(&SYMBOL_0, &SYMBOL_1)),
+            Err(format!(
+                "LP token {}_{} already exists",
+                SYMBOL_0.to_string(),
+                SYMBOL_1.to_string()
+            )),
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_liquidity_amounts_request(
+                amount_0_decimals - 2 * FEE_SNS,
+                TOKEN_0.to_string(),
+                TOKEN_1.to_string(),
+            ),
+            Ok(make_add_liquidity_amounts_reply(
+                amount_0_decimals - 2 * FEE_SNS,
+                amount_1_decimals - 2 * FEE_ICP - amount_1_remaining,
+                &SYMBOL_0,
+                &SYMBOL_1,
+            )),
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_add_liquidity_request(
+                amount_0_decimals - 2 * FEE_SNS,
+                amount_1_decimals - 2 * FEE_ICP - amount_1_remaining,
+                &TOKEN_0,
+                &TOKEN_1,
+            ),
+            Ok(make_add_liquidity_reply(
+                amount_0_decimals - 2 * FEE_SNS,
+                amount_1_decimals - 2 * FEE_ICP - amount_1_remaining,
+                &SYMBOL_0,
+                &SYMBOL_1,
+            )),
         )
         .add_call(*SNS_LEDGER, make_balance_request(), Nat::from(0_u64))
         .add_call(
-            *ICP_LEDGER, // @todo
+            *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(0_u64),
+            Nat::from(amount_1_remaining),
         )
         .add_call(*SNS_LEDGER, make_balance_request(), Nat::from(0_u64))
-        .add_call(*ICP_LEDGER, make_balance_request(), Nat::from(0_u64));
+        .add_call(
+            *ICP_LEDGER,
+            make_balance_request(),
+            Nat::from(amount_1_remaining),
+        );
+
+    // if there is any amount of token 1, we return it to the owner
+    if amount_1_remaining != 0 {
+        mock_agent = mock_agent.add_call(
+            *ICP_LEDGER,
+            make_transfer_request(
+                Account {
+                    owner: OWNER_ACCOUNT.owner,
+                    subaccount: None,
+                },
+                FEE_ICP,
+                amount_1_remaining,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 13,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(amount_1_remaining)),
+        );
+    }
 
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
@@ -156,14 +265,6 @@ async fn test_deposit_success() {
         kong_adaptor.agent.finished_calls(),
         "There are still some calls remaining"
     );
-
-    let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
-
-    let asset_1_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
 
     let balances = Balances {
         timestamp_ns: 0,

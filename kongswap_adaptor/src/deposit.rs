@@ -385,7 +385,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 mod test_failed_transfer_from;
 
 #[cfg(test)]
-mod deposit_add_liquidity;
+mod test_deposit_add_liquidity;
 
 #[cfg(test)]
-mod deposit_happy_path;
+mod test_deposit_happy_path;
