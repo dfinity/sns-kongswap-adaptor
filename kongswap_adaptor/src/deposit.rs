@@ -4,6 +4,7 @@ use crate::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddPoolArgs,
     },
     log_err,
+    logged_arithmetics::logged_saturating_sub,
     validation::{decode_nat_to_u64, ValidatedAllowance},
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
@@ -121,9 +122,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_0 = allowance_0.asset.ledger_canister_id();
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
-        let amount_0 = allowance_0
-            .amount_decimals
-            .saturating_sub(allowance_0.asset.ledger_fee_decimals());
+        let amount_0 = logged_saturating_sub(
+            allowance_0.amount_decimals,
+            allowance_0.asset.ledger_fee_decimals(),
+        );
 
         let token_0 = format!("IC.{}", ledger_0);
         let token_1 = format!("IC.{}", ledger_1);
@@ -304,16 +306,14 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let ledger_1 = allowance_1.asset.ledger_canister_id();
 
         // Adjust the amounts to take the fees into account.
-        let amount_0 = Nat::from(
-            allowance_0
-                .amount_decimals
-                .saturating_sub(allowance_0.asset.ledger_fee_decimals()),
-        );
-        let amount_1 = Nat::from(
-            allowance_1
-                .amount_decimals
-                .saturating_sub(allowance_1.asset.ledger_fee_decimals()),
-        );
+        let amount_0 = Nat::from(logged_saturating_sub(
+            allowance_0.amount_decimals,
+            allowance_0.asset.ledger_fee_decimals(),
+        ));
+        let amount_1 = Nat::from(logged_saturating_sub(
+            allowance_1.amount_decimals,
+            allowance_1.asset.ledger_fee_decimals(),
+        ));
         // Step 1. Ensure the tokens are registered with the DEX.
         // Notes on why we first add SNS and then ICP:
         // - KongSwap starts indexing tokens from 1.

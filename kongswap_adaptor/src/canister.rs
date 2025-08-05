@@ -24,11 +24,15 @@ mod emit_transaction;
 mod kong_api;
 mod kong_types;
 mod ledger_api;
+mod logged_arithmetics;
 mod rewards;
 mod state;
 mod tx_error_codes;
 mod validation;
 mod withdraw;
+
+#[cfg(test)]
+mod test_helpers;
 
 const RUN_PERIODIC_TASKS_INTERVAL: Duration = Duration::from_secs(60 * 60); // one hour
 
