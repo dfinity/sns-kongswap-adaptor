@@ -56,6 +56,43 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
+        let balances_after = self.get_ledger_balances(context).await?;
+
+        // If `claim_ids` is not empty, it means transferring at least
+        // one of the tokens from the DEX to the manager has failed.
+        // We try to find out which token has been successfully withdrawn
+        // and update the balanaces accordingly.
+        if balances_after.0 > balances_before.0 {
+            let amount_0 = logged_saturating_add(
+                decode_nat_to_u64(amount_0).unwrap(),
+                decode_nat_to_u64(lp_fee_0).unwrap(),
+            );
+
+            self.find_discrepency(
+                asset_0,
+                balances_before.0,
+                balances_after.0,
+                amount_0,
+                false,
+            );
+            self.move_asset(asset_0, amount_0, Party::External, Party::TreasuryManager);
+        }
+
+        if balances_after.1 > balances_before.1 {
+            let amount_1 = logged_saturating_add(
+                decode_nat_to_u64(amount_1).unwrap(),
+                decode_nat_to_u64(lp_fee_1).unwrap(),
+            );
+            self.find_discrepency(
+                asset_1,
+                balances_before.1,
+                balances_after.1,
+                amount_1,
+                false,
+            );
+            self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
+        }
+
         if !claim_ids.is_empty() {
             let claim_ids = claim_ids
                 .iter()
@@ -71,35 +108,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 kind: ErrorKind::Backend {},
             }]);
         }
-
-        let balances_after = self.get_ledger_balances(context).await?;
-
-        // TODO Unwrapping
-        let amount_0 = logged_saturating_add(
-            decode_nat_to_u64(amount_0).unwrap(),
-            decode_nat_to_u64(lp_fee_0).unwrap(),
-        );
-        let amount_1 = logged_saturating_add(
-            decode_nat_to_u64(amount_1).unwrap(),
-            decode_nat_to_u64(lp_fee_1).unwrap(),
-        );
-
-        self.find_discrepency(
-            asset_0,
-            balances_before.0,
-            balances_after.0,
-            amount_0,
-            false,
-        );
-        self.find_discrepency(
-            asset_1,
-            balances_before.1,
-            balances_after.1,
-            amount_1,
-            false,
-        );
-        self.move_asset(asset_0, amount_0, Party::External, Party::TreasuryManager);
-        self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
 
         Ok(())
     }
