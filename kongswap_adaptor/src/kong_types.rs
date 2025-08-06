@@ -25,7 +25,7 @@ pub struct AddLiquidityAmountsArgs {
     pub token_1: String,
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AddLiquidityAmountsReply {
     pub symbol: String,
     pub chain_0: String,
@@ -126,7 +126,7 @@ pub struct AddLiquidityArgs {
     pub tx_id_1: Option<TxId>,
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AddLiquidityReply {
     pub tx_id: u64,
     pub request_id: u64,
@@ -452,7 +452,7 @@ impl Request for RemoveLiquidityArgs {
     }
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RemoveLiquidityReply {
     pub tx_id: u64,
     pub request_id: u64,
@@ -547,7 +547,7 @@ pub struct ClaimsArgs {
     pub principal_id: String,
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClaimsReply {
     pub claim_id: u64,
     pub status: String,
@@ -594,7 +594,7 @@ pub struct ClaimArgs {
     pub claim_id: u64,
 }
 
-#[derive(CandidType, Debug, Clone, Serialize, Deserialize)]
+#[derive(CandidType, Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClaimReply {
     pub claim_id: u64,
     pub status: String,
