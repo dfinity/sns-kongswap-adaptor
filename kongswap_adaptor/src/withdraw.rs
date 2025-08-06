@@ -58,10 +58,10 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let balances_after = self.get_ledger_balances(context).await?;
 
-        // If `claim_ids` is not empty, it means transferring at least
-        // one of the tokens from the DEX to the manager has failed.
-        // We try to find out which token has been successfully withdrawn
-        // and update the balanaces accordingly.
+        // When withdrawing from the DEX, transferring tokens could fail.
+        // In this case, kongswap backend reutrns a non-empty `claim_ids`.
+        // Here, we try to find out which token has been successfully
+        // withdrawn and update the balanaces accordingly.
         if balances_after.0 > balances_before.0 {
             let amount_0 = logged_saturating_add(
                 decode_nat_to_u64(amount_0).unwrap(),
@@ -93,6 +93,11 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
         }
 
+        // If we have a non-empty `claim_ids`, we are going to return
+        // an Error, indicating the the withdrawal from the DEX, was
+        // incomplete or unsuccessful.
+        // It wouldn't break our accounting, as we have already updated
+        // the balances if any transfer has been successful.
         if !claim_ids.is_empty() {
             let claim_ids = claim_ids
                 .iter()
