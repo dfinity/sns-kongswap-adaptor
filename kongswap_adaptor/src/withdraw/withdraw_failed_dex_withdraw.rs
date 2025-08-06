@@ -16,8 +16,11 @@ use sns_treasury_manager::{
 };
 use std::cell::RefCell;
 
+// This test represents the case, in which when withdrawing
+// the tokens from the DEX, withdrawing ICP (token 1) fails
+// and we get a claim_id for that.
 #[tokio::test]
-async fn test_withdraw_success() {
+async fn test_withdraw_from_dex_fail() {
     let amount_0_decimals = 500 * E8;
     let amount_1_decimals = 400 * E8;
 
@@ -86,7 +89,36 @@ async fn test_withdraw_success() {
                 0,
                 0,
                 100,
-                vec![],
+                vec![1],
+            )),
+        )
+        .add_call(
+            *SNS_LEDGER,
+            make_balance_request(),
+            Nat::from(amount_0_decimals - 3 * FEE_SNS),
+        )
+        .add_call(*ICP_LEDGER, make_balance_request(), Nat::from(0_u64))
+        .add_call(
+            *SNS_LEDGER,
+            make_balance_request(),
+            Nat::from(amount_0_decimals - 3 * FEE_SNS),
+        )
+        .add_call(*ICP_LEDGER, make_balance_request(), Nat::from(0_u64))
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            ClaimsArgs {
+                principal_id: SELF_CANISTER_ID.to_string(),
+            },
+            Ok(vec![make_claims_reply(&SYMBOL_0, &SYMBOL_1)]),
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            ClaimArgs { claim_id: 0 },
+            Ok(make_claim_reply(
+                &SYMBOL_0,
+                &SYMBOL_1,
+                ICP_LEDGER.to_string(),
+                amount_1_decimals - 2 * FEE_ICP,
             )),
         )
         .add_call(
@@ -110,23 +142,6 @@ async fn test_withdraw_success() {
             Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
-            *KONG_BACKEND_CANISTER_ID,
-            ClaimsArgs {
-                principal_id: SELF_CANISTER_ID.to_string(),
-            },
-            Ok(vec![]),
-        )
-        .add_call(
-            *SNS_LEDGER,
-            make_balance_request(),
-            Nat::from(amount_0_decimals - 3 * FEE_SNS),
-        )
-        .add_call(
-            *ICP_LEDGER,
-            make_balance_request(),
-            Nat::from(amount_1_decimals - 3 * FEE_ICP),
-        )
-        .add_call(
             *SNS_LEDGER,
             make_transfer_request(
                 Account {
@@ -138,7 +153,7 @@ async fn test_withdraw_success() {
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Withdraw,
                     step: Step {
-                        index: 11,
+                        index: 14,
                         is_final: false,
                     },
                 },
@@ -157,13 +172,61 @@ async fn test_withdraw_success() {
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Withdraw,
                     step: Step {
-                        index: 12,
+                        index: 15,
                         is_final: false,
                     },
                 },
             ),
             Ok(Nat::from(amount_1_decimals - 3 * FEE_ICP)),
         );
+    // .add_call(
+    //     *SNS_LEDGER,
+    //     make_balance_request(),
+    //     Nat::from(amount_0_decimals - 3 * FEE_SNS),
+    // )
+    // .add_call(
+    //     *ICP_LEDGER,
+    //     make_balance_request(),
+    //     Nat::from(amount_1_decimals - 3 * FEE_ICP),
+    // )
+    // .add_call(
+    //     *SNS_LEDGER,
+    //     make_transfer_request(
+    //         Account {
+    //             owner: OWNER_ACCOUNT.owner,
+    //             subaccount: None,
+    //         },
+    //         FEE_SNS,
+    //         amount_0_decimals - 3 * FEE_SNS,
+    //         TreasuryManagerOperation {
+    //             operation: sns_treasury_manager::Operation::Withdraw,
+    //             step: Step {
+    //                 index: 11,
+    //                 is_final: false,
+    //             },
+    //         },
+    //     ),
+    //     Ok(Nat::from(amount_0_decimals - 3 * FEE_SNS)),
+    // )
+    // .add_call(
+    //     *ICP_LEDGER,
+    //     make_transfer_request(
+    //         Account {
+    //             owner: OWNER_ACCOUNT.owner,
+    //             subaccount: None,
+    //         },
+    //         FEE_ICP,
+    //         amount_1_decimals - 3 * FEE_ICP,
+    //         TreasuryManagerOperation {
+    //             operation: sns_treasury_manager::Operation::Withdraw,
+    //             step: Step {
+    //                 index: 12,
+    //                 is_final: false,
+    //             },
+    //         },
+    //     ),
+    //     Ok(Nat::from(amount_1_decimals - 3 * FEE_ICP)),
+    // );
 
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function

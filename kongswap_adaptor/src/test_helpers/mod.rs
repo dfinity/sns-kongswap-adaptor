@@ -269,6 +269,7 @@ pub(crate) fn make_remove_liquidity_reply(
     lp_fee_0: u64,
     lp_fee_1: u64,
     remove_lp_token_amount: u64,
+    claim_ids: Vec<u64>,
 ) -> RemoveLiquidityReply {
     RemoveLiquidityReply {
         tx_id: 0,
@@ -287,7 +288,7 @@ pub(crate) fn make_remove_liquidity_reply(
         lp_fee_1: Nat::from(lp_fee_1),
         remove_lp_token_amount: Nat::from(remove_lp_token_amount),
         transfer_ids: vec![],
-        claim_ids: vec![],
+        claim_ids,
         ts: 0,
     }
 }
