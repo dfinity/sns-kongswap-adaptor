@@ -253,3 +253,6 @@ mod withdraw_happy_path;
 
 #[cfg(test)]
 mod withdraw_retry;
+
+#[cfg(test)]
+mod withdraw_failed_dex_withdraw;
