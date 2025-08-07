@@ -73,7 +73,7 @@ async fn e2e_test() {
     let kong_adaptor_canister_id = create_kong_adaptor(&agent.pic(), fiduciary_subnet_id).await;
 
     mint_tokens(
-        agent.with_sender(*SNS_ROOT_CANISTER_ID),
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
         sns_ledger_canister_ic,
         Account {
             owner: kong_adaptor_canister_id,
@@ -353,7 +353,7 @@ async fn install_sns_ledger(pocket_ic: &PocketIc) -> Principal {
 
     let icrc1_wasm = Wasm::from_file(wasm_path);
 
-    let owner = *SNS_ROOT_CANISTER_ID;
+    let owner = *SNS_GOVERNANCE_CANISTER_ID;
     let controllers = vec![owner];
 
     let arg = InitArgsBuilder::with_symbol_and_name("SNS", "My DAO Token")
