@@ -66,7 +66,7 @@ async fn e2e_test() {
     let fiduciary_subnet_id = topology.get_fiduciary().unwrap();
 
     let _kong_backend_canister_id = install_kong_swap(&agent.pic()).await;
-    let sns_ledger_canister_ic = install_sns_ledger(&agent.pic()).await;
+    let sns_ledger_canister_id = install_sns_ledger(&agent.pic()).await;
     let icp_ledger_canister_id = install_icp_ledger(&agent.pic()).await;
 
     // Install canister under test.
@@ -74,7 +74,7 @@ async fn e2e_test() {
 
     mint_tokens(
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
-        sns_ledger_canister_ic,
+        sns_ledger_canister_id,
         Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
