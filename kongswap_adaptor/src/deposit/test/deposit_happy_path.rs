@@ -1,9 +1,10 @@
-use super::*;
-use crate::test_helpers::*;
+use crate::state::KongSwapAdaptor;
 use crate::{
     state::storage::ConfigState, validation::ValidatedTreasuryManagerInit, StableAuditTrail,
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
 };
+use crate::{test_helpers::*, KONG_BACKEND_CANISTER_ID};
+use candid::Nat;
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use kongswap_adaptor::agent::mock_agent::MockAgent;
@@ -116,11 +117,7 @@ async fn test_deposit_success() {
             Ok(make_add_pool_reply(&SYMBOL_0, &SYMBOL_1)),
         )
         .add_call(*SNS_LEDGER, make_balance_request(), Nat::from(0_u64))
-        .add_call(
-            *ICP_LEDGER, // @todo
-            make_balance_request(),
-            Nat::from(0_u64),
-        )
+        .add_call(*ICP_LEDGER, make_balance_request(), Nat::from(0_u64))
         .add_call(*SNS_LEDGER, make_balance_request(), Nat::from(0_u64))
         .add_call(*ICP_LEDGER, make_balance_request(), Nat::from(0_u64));
 
