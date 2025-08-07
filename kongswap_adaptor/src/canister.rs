@@ -142,6 +142,8 @@ impl<A: AbstractAgent> TreasuryManager for KongSwapAdaptor<A> {
     async fn withdraw(&mut self, request: WithdrawRequest) -> TreasuryManagerResult {
         self.check_state_lock()?;
 
+        self.refresh_balances().await;
+
         let (ledger_0, ledger_1) = self.ledgers();
 
         let (default_owner_0, default_owner_1) = self.owner_accounts();
