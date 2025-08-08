@@ -94,6 +94,26 @@ async fn test_withdraw_retry() {
             *KONG_BACKEND_CANISTER_ID,
             make_lp_balance_request(),
             Ok(vec![make_lp_balance_reply(
+                SYMBOL_0.clone(),
+                SYMBOL_1.clone(),
+                100.0,
+            )]),
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_remove_liquidity_amount_request(SYMBOL_0.clone(), SYMBOL_1.clone(), 100 * E8),
+            Ok(make_remove_liquidity_amount_reply(
+                amount_0_decimals - 2 * FEE_SNS,
+                0,
+                amount_1_decimals - 2 * FEE_ICP,
+                0,
+                100 * E8,
+            )),
+        )
+        .add_call(
+            *KONG_BACKEND_CANISTER_ID,
+            make_lp_balance_request(),
+            Ok(vec![make_lp_balance_reply(
                 symbol_0.clone(),
                 symbol_1.clone(),
                 0.0,

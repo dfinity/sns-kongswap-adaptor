@@ -14,8 +14,8 @@ use crate::{
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply, AddTokenArgs, AddTokenReply, ClaimReply, ClaimsReply, ICReply,
-        RemoveLiquidityArgs, RemoveLiquidityReply, UserBalanceLPReply, UserBalancesArgs,
-        UserBalancesReply,
+        RemoveLiquidityAmountsArgs, RemoveLiquidityAmountsReply, RemoveLiquidityArgs,
+        RemoveLiquidityReply, UserBalanceLPReply, UserBalancesArgs, UserBalancesReply,
     },
     validation::{decode_nat_to_u64, ValidatedAsset},
     KONG_BACKEND_CANISTER_ID,
@@ -357,6 +357,35 @@ pub(crate) fn make_add_liquidity_reply(
         amount_0: Nat::from(amount_0),
         symbol_1: symbol_1.to_string(),
         amount_1: Nat::from(amount_1),
+        ..Default::default()
+    }
+}
+
+pub(crate) fn make_remove_liquidity_amount_request(
+    token_0: String,
+    token_1: String,
+    remove_lp_token_amount: u64,
+) -> RemoveLiquidityAmountsArgs {
+    RemoveLiquidityAmountsArgs {
+        token_0,
+        token_1,
+        remove_lp_token_amount: Nat::from(remove_lp_token_amount),
+    }
+}
+
+pub(crate) fn make_remove_liquidity_amount_reply(
+    amount_0: u64,
+    lp_fee_0: u64,
+    amount_1: u64,
+    lp_fee_1: u64,
+    remove_lp_token_amount: u64,
+) -> RemoveLiquidityAmountsReply {
+    RemoveLiquidityAmountsReply {
+        amount_0: Nat::from(amount_0),
+        lp_fee_0: Nat::from(lp_fee_0),
+        amount_1: Nat::from(amount_1),
+        lp_fee_1: Nat::from(lp_fee_1),
+        remove_lp_token_amount: Nat::from(remove_lp_token_amount),
         ..Default::default()
     }
 }
