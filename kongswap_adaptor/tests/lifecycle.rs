@@ -19,8 +19,8 @@ use pocket_ic_agent::PocketIcAgent;
 // use pretty_assertions::assert_eq;
 use sha2::Digest;
 use sns_treasury_manager::{
-    self, Allowance, Asset, DepositRequest, TreasuryManagerArg, TreasuryManagerInit,
-    WithdrawRequest,
+    self, Allowance, Asset, BalancesRequest, DepositRequest, TreasuryManagerArg,
+    TreasuryManagerInit, WithdrawRequest,
 };
 use std::time::Duration;
 
@@ -381,6 +381,34 @@ async fn lifecycle_test() {
             agent.pic().tick().await;
         }
     }
+    // At this point pool has more SNS than ICP
+    {
+        let balances_request = BalancesRequest {};
+        let balances = agent
+            .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
+            .call(kong_adaptor_canister_id, balances_request)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let asset_to_balance = balances.asset_to_balances.unwrap();
+        let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
+        let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
+
+        assert!(
+            balances_0
+                .external_custodian
+                .as_ref()
+                .unwrap()
+                .amount_decimals
+                > balances_1
+                    .external_custodian
+                    .as_ref()
+                    .unwrap()
+                    .amount_decimals,
+            "We expect to have more SNS in the pool than ICP"
+        );
+    }
     // VI: final phase: withdrawal
     {
         let withdraw_request = WithdrawRequest {
@@ -394,7 +422,37 @@ async fn lifecycle_test() {
             .unwrap()
             .unwrap();
 
-        println!("balances after withdrawal: {:#?}", response);
+        let asset_to_balance = response.asset_to_balances.unwrap();
+        let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
+        let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
+
+        assert_eq!(
+            balances_0.fee_collector.as_ref().unwrap().amount_decimals,
+            Nat::from(8 * FEE_SNS)
+        );
+        assert_eq!(
+            balances_1.fee_collector.as_ref().unwrap().amount_decimals,
+            Nat::from(9 * FEE_ICP)
+        );
+
+        assert_eq!(
+            balances_0
+                .external_custodian
+                .as_ref()
+                .unwrap()
+                .amount_decimals,
+            Nat::from(0_u64),
+            "There should be no SNS left in the DEX"
+        );
+        assert_eq!(
+            balances_1
+                .external_custodian
+                .as_ref()
+                .unwrap()
+                .amount_decimals,
+            Nat::from(0_u64),
+            "There should be no ICP left in the DEX"
+        );
     }
 }
 
@@ -505,14 +563,6 @@ async fn mint_tokens<Agent>(
         .await
         .unwrap()
         .unwrap();
-
-    // let balance_request = beneficiary_account;
-    // let balance = agent
-    //     .call(icrc1_ledger_canister_id, balance_request)
-    //     .await
-    //     .unwrap();
-
-    // println!("balance of beneficiary after minting {}", balance);
 }
 
 async fn install_sns_ledger(pocket_ic: &PocketIc) -> Principal {
