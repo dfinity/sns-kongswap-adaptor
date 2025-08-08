@@ -38,7 +38,8 @@ def main():
                        help='Run tests with verbose output')
     parser.add_argument('--test-name', type=str, 
                        help='Run specific test by name')
-    
+    parser.add_argument('--nocapture', action= 'store_true', help='Runs tests with `--no-capture` flag')
+
     args = parser.parse_args()
     
     # Get project paths
@@ -80,7 +81,9 @@ def main():
     
     if args.test_name:
         cargo_test_cmd.append(args.test_name)
-    
+
+    if args.nocapture:
+        cargo_test_cmd.extend(["--", "--nocapture"])
     # Run tests
     print(f"Running tests: {' '.join(cargo_test_cmd)}")
     
