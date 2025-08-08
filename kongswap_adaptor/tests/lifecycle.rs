@@ -16,7 +16,7 @@ use kongswap_types::SwapArgs;
 use lazy_static::lazy_static;
 use pocket_ic::{nonblocking::PocketIc, PocketIcBuilder};
 use pocket_ic_agent::PocketIcAgent;
-// use pretty_assertions::assert_eq;
+use pretty_assertions::assert_eq;
 use sha2::Digest;
 use sns_treasury_manager::{
     self, Allowance, Asset, BalancesRequest, DepositRequest, TreasuryManagerArg,
