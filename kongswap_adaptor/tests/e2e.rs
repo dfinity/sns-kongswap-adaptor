@@ -28,9 +28,6 @@ lazy_static! {
     static ref SNS_LEDGER_CANISTER_ID: Principal =
         Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
 
-    static ref SNS_ROOT_CANISTER_ID: Principal =
-        Principal::from_text("ju4gz-6iaaa-aaaaq-aaeva-cai").unwrap();
-
     static ref SNS_GOVERNANCE_CANISTER_ID: Principal =
         Principal::from_text("jt5an-tqaaa-aaaaq-aaevq-cai").unwrap();
 
@@ -134,7 +131,7 @@ async fn e2e_test() {
 
     let module_hash_before_upgrade = agent
         .pic()
-        .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
+        .canister_status(kong_adaptor_canister_id, Some(*SNS_GOVERNANCE_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
@@ -157,7 +154,7 @@ async fn e2e_test() {
                 TreasuryManagerUpgrade {},
             ))
             .unwrap(),
-            Some(*SNS_ROOT_CANISTER_ID),
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
         )
         .await
         .unwrap();
@@ -170,7 +167,7 @@ async fn e2e_test() {
 
     let module_hash_after_upgrade = agent
         .pic()
-        .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
+        .canister_status(kong_adaptor_canister_id, Some(*SNS_GOVERNANCE_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
@@ -196,14 +193,14 @@ async fn e2e_test() {
                 TreasuryManagerUpgrade {},
             ))
             .unwrap(),
-            Some(*SNS_ROOT_CANISTER_ID),
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
         )
         .await
         .unwrap();
 
     let module_hash_after_second_upgrade = agent
         .pic()
-        .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
+        .canister_status(kong_adaptor_canister_id, Some(*SNS_GOVERNANCE_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
@@ -232,7 +229,7 @@ async fn e2e_test() {
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
-    let controllers = vec![*SNS_ROOT_CANISTER_ID];
+    let controllers = vec![*SNS_GOVERNANCE_CANISTER_ID];
 
     let (canister_id, _) = create_canister_with_controllers(
         pocket_ic,
@@ -289,7 +286,12 @@ async fn install_kong_adaptor(
     let arg = candid::encode_one(&arg).unwrap();
 
     pocket_ic
-        .install_canister(canister_id, wasm.bytes(), arg, Some(*SNS_ROOT_CANISTER_ID))
+        .install_canister(
+            canister_id,
+            wasm.bytes(),
+            arg,
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
+        )
         .await;
 
     let subnet_id = pocket_ic.get_subnet(canister_id).await.unwrap();
