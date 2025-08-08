@@ -168,6 +168,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     ..
                 }) => {
                     if let Some(asset) = self.get_asset_for_ledger(&canister_id) {
+                        let (balances_before, balances_after) = if asset == self.assets().0 {
+                            (balances_before.0, balances_after.0)
+                        } else {
+                            (balances_before.1, balances_after.1)
+                        };
+
                         match decode_nat_to_u64(amount) {
                             Ok(amount) => {
                                 self.move_asset(
@@ -178,8 +184,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                                 );
                                 self.find_discrepency(
                                     asset,
-                                    balances_before.0,
-                                    balances_after.0,
+                                    balances_before,
+                                    balances_after,
                                     amount,
                                     false,
                                 );
