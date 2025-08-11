@@ -11,6 +11,7 @@ use sns_treasury_manager::{Asset, BalanceBook, TreasuryManagerOperation};
 
 use crate::{
     balances::{ValidatedBalanceBook, ValidatedBalances},
+    deposit::ONE_HOUR,
     kong_types::{
         AddLiquidityAmountsArgs, AddLiquidityAmountsReply, AddLiquidityArgs, AddLiquidityReply,
         AddPoolArgs, AddPoolReply, AddTokenArgs, AddTokenReply, ClaimReply, ClaimsReply, ICReply,
@@ -75,7 +76,7 @@ pub(crate) fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
         // All approved tokens should be fully used up before the next deposit.
         amount: Nat::from(amount - fee),
         expected_allowance: Some(Nat::from(0u8)),
-        expires_at: Some(u64::MAX),
+        expires_at: Some(ONE_HOUR),
         memo: None,
         created_at_time: None,
         fee: Some(fee.into()),
