@@ -34,6 +34,9 @@ lazy_static! {
     static ref SNS_LEDGER_CANISTER_ID: Principal =
         Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
 
+    static ref SNS_ROOT_CANISTER_ID: Principal =
+        Principal::from_text("ju4gz-6iaaa-aaaaq-aaeva-cai").unwrap();
+
     static ref SNS_GOVERNANCE_CANISTER_ID: Principal =
         Principal::from_text("jt5an-tqaaa-aaaaq-aaevq-cai").unwrap();
 
@@ -457,7 +460,7 @@ async fn lifecycle_test() {
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
-    let controllers = vec![*SNS_GOVERNANCE_CANISTER_ID];
+    let controllers = vec![*SNS_ROOT_CANISTER_ID, *SNS_GOVERNANCE_CANISTER_ID];
 
     let (canister_id, _) = create_canister_with_controllers(
         pocket_ic,
@@ -502,12 +505,7 @@ async fn install_kong_adaptor(
     let arg = candid::encode_one(&arg).unwrap();
 
     pocket_ic
-        .install_canister(
-            canister_id,
-            wasm.bytes(),
-            arg,
-            Some(*SNS_GOVERNANCE_CANISTER_ID),
-        )
+        .install_canister(canister_id, wasm.bytes(), arg, Some(*SNS_ROOT_CANISTER_ID))
         .await;
 
     let subnet_id = pocket_ic.get_subnet(canister_id).await.unwrap();
@@ -571,12 +569,11 @@ async fn install_sns_ledger(pocket_ic: &PocketIc) -> Principal {
 
     let icrc1_wasm = Wasm::from_file(wasm_path);
 
-    let owner = *SNS_GOVERNANCE_CANISTER_ID;
-    let controllers = vec![owner];
+    let controllers = vec![*SNS_ROOT_CANISTER_ID];
 
     let arg = InitArgsBuilder::with_symbol_and_name("SNS", "My DAO Token")
         .with_transfer_fee(FEE_SNS)
-        .with_minting_account(owner)
+        .with_minting_account(*SNS_GOVERNANCE_CANISTER_ID)
         .build();
 
     let arg = LedgerArgument::Init(arg);
