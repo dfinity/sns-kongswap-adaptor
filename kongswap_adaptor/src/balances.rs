@@ -517,15 +517,19 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await?;
 
         let RemoveLiquidityAmountsReply {
-            amount_0, amount_1, ..
+            amount_0,
+            amount_1,
+            lp_fee_0,
+            lp_fee_1,
+            ..
         } = reply;
 
-        let balance_0_decimals = decode_nat_to_u64(amount_0).map_err(|err| Error {
+        let balance_0_decimals = decode_nat_to_u64(amount_0 + lp_fee_0).map_err(|err| Error {
             code: u64::from(TransactionErrorCodes::PostConditionCode),
             message: err.clone(),
             kind: ErrorKind::Postcondition {},
         })?;
-        let balance_1_decimals = decode_nat_to_u64(amount_1).map_err(|err| Error {
+        let balance_1_decimals = decode_nat_to_u64(amount_1 + lp_fee_1).map_err(|err| Error {
             code: u64::from(TransactionErrorCodes::PostConditionCode),
             message: err.clone(),
             kind: ErrorKind::Postcondition {},
