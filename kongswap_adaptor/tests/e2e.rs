@@ -66,15 +66,15 @@ async fn e2e_test() {
     let fiduciary_subnet_id = topology.get_fiduciary().unwrap();
 
     let _kong_backend_canister_id = install_kong_swap(&agent.pic()).await;
-    let sns_ledger_canister_ic = install_sns_ledger(&agent.pic()).await;
+    let sns_ledger_canister_id = install_sns_ledger(&agent.pic()).await;
     let icp_ledger_canister_id = install_icp_ledger(&agent.pic()).await;
 
     // Install canister under test.
     let kong_adaptor_canister_id = create_kong_adaptor(&agent.pic(), fiduciary_subnet_id).await;
 
     mint_tokens(
-        agent.with_sender(*SNS_ROOT_CANISTER_ID),
-        sns_ledger_canister_ic,
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        sns_ledger_canister_id,
         Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
@@ -134,7 +134,7 @@ async fn e2e_test() {
 
     let module_hash_before_upgrade = agent
         .pic()
-        .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
+        .canister_status(kong_adaptor_canister_id, Some(*SNS_GOVERNANCE_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
@@ -157,7 +157,7 @@ async fn e2e_test() {
                 TreasuryManagerUpgrade {},
             ))
             .unwrap(),
-            Some(*SNS_ROOT_CANISTER_ID),
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
         )
         .await
         .unwrap();
@@ -170,7 +170,7 @@ async fn e2e_test() {
 
     let module_hash_after_upgrade = agent
         .pic()
-        .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
+        .canister_status(kong_adaptor_canister_id, Some(*SNS_GOVERNANCE_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
@@ -196,14 +196,14 @@ async fn e2e_test() {
                 TreasuryManagerUpgrade {},
             ))
             .unwrap(),
-            Some(*SNS_ROOT_CANISTER_ID),
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
         )
         .await
         .unwrap();
 
     let module_hash_after_second_upgrade = agent
         .pic()
-        .canister_status(kong_adaptor_canister_id, Some(*SNS_ROOT_CANISTER_ID))
+        .canister_status(kong_adaptor_canister_id, Some(*SNS_GOVERNANCE_CANISTER_ID))
         .await
         .unwrap()
         .module_hash
@@ -232,7 +232,7 @@ async fn e2e_test() {
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
-    let controllers = vec![*SNS_ROOT_CANISTER_ID];
+    let controllers = vec![*SNS_ROOT_CANISTER_ID, *SNS_GOVERNANCE_CANISTER_ID];
 
     let (canister_id, _) = create_canister_with_controllers(
         pocket_ic,
@@ -289,7 +289,12 @@ async fn install_kong_adaptor(
     let arg = candid::encode_one(&arg).unwrap();
 
     pocket_ic
-        .install_canister(canister_id, wasm.bytes(), arg, Some(*SNS_ROOT_CANISTER_ID))
+        .install_canister(
+            canister_id,
+            wasm.bytes(),
+            arg,
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
+        )
         .await;
 
     let subnet_id = pocket_ic.get_subnet(canister_id).await.unwrap();
@@ -353,11 +358,10 @@ async fn install_sns_ledger(pocket_ic: &PocketIc) -> Principal {
 
     let icrc1_wasm = Wasm::from_file(wasm_path);
 
-    let owner = *SNS_ROOT_CANISTER_ID;
-    let controllers = vec![owner];
+    let controllers = vec![*SNS_ROOT_CANISTER_ID];
 
     let arg = InitArgsBuilder::with_symbol_and_name("SNS", "My DAO Token")
-        .with_minting_account(owner)
+        .with_minting_account(*SNS_GOVERNANCE_CANISTER_ID)
         .build();
 
     let arg = LedgerArgument::Init(arg);
