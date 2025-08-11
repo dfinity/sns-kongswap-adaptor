@@ -19,7 +19,7 @@ use pocket_ic_agent::PocketIcAgent;
 use pretty_assertions::assert_eq;
 use sha2::Digest;
 use sns_treasury_manager::{
-    self, Allowance, Asset, BalancesRequest, DepositRequest, TreasuryManagerArg,
+    self, Allowance, Asset, BalanceBook, BalancesRequest, DepositRequest, TreasuryManagerArg,
     TreasuryManagerInit, WithdrawRequest,
 };
 use std::time::Duration;
@@ -54,6 +54,8 @@ lazy_static! {
     static ref KONGSWAP_BACKEND_CANISTER_ID: Principal =
         Principal::from_text("2ipq2-uqaaa-aaaar-qailq-cai").unwrap();
 
+    static ref TRADER_PRINCIPAL_ID: Principal = Principal::from_text("zmbi7-fyaaa-aaaaq-aaahq-cai").unwrap();
+
     static ref SNS_ASSET: Asset = Asset::Token {
         symbol: "SNS".to_string(),
         ledger_canister_id: *SNS_LEDGER_CANISTER_ID,
@@ -84,7 +86,7 @@ async fn lifecycle_test() {
     let topology = agent.pic().topology().await;
     let fiduciary_subnet_id = topology.get_fiduciary().unwrap();
 
-    let _kong_backend_canister_id = install_kong_swap(&agent.pic()).await;
+    install_kong_swap(&agent.pic()).await;
     let sns_ledger_canister_id = install_sns_ledger(&agent.pic()).await;
     let icp_ledger_canister_id = install_icp_ledger(&agent.pic()).await;
 
@@ -106,297 +108,61 @@ async fn lifecycle_test() {
     let original_wasm = get_kong_adaptor_wasm();
 
     // Phase I: setup the canister
-    {
-        let initial_deposit = 100 * E8;
-        mint_tokens(
-            agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
-            sns_ledger_canister_id,
-            Account {
-                owner: kong_adaptor_canister_id,
-                subaccount: None,
-            },
-            initial_deposit,
-        )
-        .await;
+    setup_kongswap_adaptor(
+        &mut agent,
+        sns_ledger_canister_id,
+        icp_ledger_canister_id,
+        kong_adaptor_canister_id,
+        &original_wasm,
+        treasury_icp_account,
+        treasury_sns_account,
+    )
+    .await;
 
-        mint_tokens(
-            agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
-            icp_ledger_canister_id,
-            Account {
-                owner: kong_adaptor_canister_id,
-                subaccount: None,
-            },
-            initial_deposit,
-        )
-        .await;
-
-        install_kong_adaptor(
-            &agent.pic(),
-            original_wasm.clone(),
-            kong_adaptor_canister_id,
-            treasury_icp_account,
-            treasury_sns_account,
-            initial_deposit,
-            initial_deposit,
-        )
-        .await;
-
-        // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
-        // tasks to be processed.
-        for _ in 0..100 {
-            agent.pic().advance_time(Duration::from_secs(1)).await;
-            agent.pic().tick().await;
-        }
-    }
     // Phase II: another deposit
-    {
-        let topup = 10 * E8;
-        mint_tokens(
-            agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
-            sns_ledger_canister_id,
-            Account {
-                owner: kong_adaptor_canister_id,
-                subaccount: None,
-            },
-            topup,
-        )
-        .await;
-
-        mint_tokens(
-            agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
-            icp_ledger_canister_id,
-            Account {
-                owner: kong_adaptor_canister_id,
-                subaccount: None,
-            },
-            topup,
-        )
-        .await;
-
-        let deposit_request = DepositRequest {
-            allowances: vec![
-                Allowance {
-                    asset: SNS_ASSET.clone(),
-                    amount_decimals: Nat::from(topup),
-                    owner_account: treasury_sns_account,
-                },
-                Allowance {
-                    amount_decimals: Nat::from(topup),
-                    asset: ICP_ASSET.clone(),
-                    owner_account: treasury_icp_account,
-                },
-            ],
-        };
-
-        let _deposit_response = agent
-            .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
-            .call(kong_adaptor_canister_id, deposit_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
-        // tasks to be processed.
-        for _ in 0..100 {
-            agent.pic().advance_time(Duration::from_secs(1)).await;
-            agent.pic().tick().await;
-        }
-    }
+    deposit(
+        &mut agent,
+        sns_ledger_canister_id,
+        icp_ledger_canister_id,
+        kong_adaptor_canister_id,
+        treasury_sns_account,
+        treasury_icp_account,
+        10 * E8,
+    )
+    .await;
     // Phase III: first trade
-    {
-        let trader_balance = 2 * E8;
-        let trade_amount_0 = 1 * E8;
-        let trader_0 = Principal::from_text("zmbi7-fyaaa-aaaaq-aaahq-cai").unwrap();
-
-        mint_tokens(
-            agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
-            sns_ledger_canister_id,
-            Account {
-                owner: trader_0,
-                subaccount: None,
-            },
-            trader_balance,
-        )
-        .await;
-
-        // First we give allowance to the Kongswap backend
-        let approve_request = ApproveArgs {
-            from_subaccount: None,
-            spender: Account {
-                owner: *KONGSWAP_BACKEND_CANISTER_ID,
-                subaccount: None,
-            },
-            amount: Nat::from(trade_amount_0),
-            expected_allowance: Some(Nat::from(0u8)),
-            expires_at: Some(u64::MAX),
-            memo: None,
-            created_at_time: None,
-            fee: Some(Nat::from(FEE_SNS)),
-        };
-
-        let _approve_args_response = agent
-            .with_sender(trader_0)
-            .call(sns_ledger_canister_id, approve_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let swap_request = SwapArgs {
-            pay_token: format!("IC.{}", sns_ledger_canister_id),
-            pay_amount: Nat::from(trade_amount_0 - FEE_SNS),
-            pay_tx_id: None,
-            receive_token: format!("IC.{}", icp_ledger_canister_id),
-            receive_amount: None,
-            receive_address: None,
-            max_slippage: Some(10.0),
-            referred_by: None,
-        };
-
-        let _response = agent
-            .with_sender(trader_0)
-            .call(*KONGSWAP_BACKEND_CANISTER_ID, swap_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
-        // tasks to be processed.
-        for _ in 0..100 {
-            agent.pic().advance_time(Duration::from_secs(1)).await;
-            agent.pic().tick().await;
-        }
-    }
+    trade(
+        &mut agent,
+        sns_ledger_canister_id,
+        icp_ledger_canister_id,
+        1 * E8,
+        true,
+    )
+    .await;
     // Phase IV: another deposit
-    {
-        let topup = 10 * E8;
-        mint_tokens(
-            agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
-            sns_ledger_canister_id,
-            Account {
-                owner: kong_adaptor_canister_id,
-                subaccount: None,
-            },
-            topup,
-        )
-        .await;
-
-        mint_tokens(
-            agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
-            icp_ledger_canister_id,
-            Account {
-                owner: kong_adaptor_canister_id,
-                subaccount: None,
-            },
-            topup,
-        )
-        .await;
-
-        let deposit_request = DepositRequest {
-            allowances: vec![
-                Allowance {
-                    asset: SNS_ASSET.clone(),
-                    amount_decimals: Nat::from(topup),
-                    owner_account: treasury_sns_account,
-                },
-                Allowance {
-                    amount_decimals: Nat::from(topup),
-                    asset: ICP_ASSET.clone(),
-                    owner_account: treasury_icp_account,
-                },
-            ],
-        };
-
-        let _deposit_response = agent
-            .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
-            .call(kong_adaptor_canister_id, deposit_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
-        // tasks to be processed.
-        for _ in 0..100 {
-            agent.pic().advance_time(Duration::from_secs(1)).await;
-            agent.pic().tick().await;
-        }
-    }
+    deposit(
+        &mut agent,
+        sns_ledger_canister_id,
+        icp_ledger_canister_id,
+        kong_adaptor_canister_id,
+        treasury_sns_account,
+        treasury_icp_account,
+        10 * E8,
+    )
+    .await;
     // Phase V: second trade
-    {
-        let trader_balance = 2 * E8;
-        let trade_amount_1 = 1 * E8;
-        let trader_1 = Principal::from_text("znhy2-2qaaa-aaaag-acofq-cai").unwrap();
+    trade(
+        &mut agent,
+        sns_ledger_canister_id,
+        icp_ledger_canister_id,
+        1 * E8,
+        false,
+    )
+    .await;
 
-        mint_tokens(
-            agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
-            icp_ledger_canister_id,
-            Account {
-                owner: trader_1,
-                subaccount: None,
-            },
-            trader_balance,
-        )
-        .await;
-
-        // First we give allowance to the Kongswap backend
-        let approve_request = ApproveArgs {
-            from_subaccount: None,
-            spender: Account {
-                owner: *KONGSWAP_BACKEND_CANISTER_ID,
-                subaccount: None,
-            },
-            amount: Nat::from(trade_amount_1),
-            expected_allowance: Some(Nat::from(0u8)),
-            expires_at: Some(u64::MAX),
-            memo: None,
-            created_at_time: None,
-            fee: Some(Nat::from(FEE_ICP)),
-        };
-
-        let _approve_args_response = agent
-            .with_sender(trader_1)
-            .call(icp_ledger_canister_id, approve_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let swap_request = SwapArgs {
-            pay_token: format!("IC.{}", icp_ledger_canister_id),
-            pay_amount: Nat::from(trade_amount_1 - FEE_ICP),
-            pay_tx_id: None,
-            receive_token: format!("IC.{}", sns_ledger_canister_id),
-            receive_amount: None,
-            receive_address: None,
-            max_slippage: Some(10.0),
-            referred_by: None,
-        };
-
-        let _response = agent
-            .with_sender(trader_1)
-            .call(*KONGSWAP_BACKEND_CANISTER_ID, swap_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
-        // tasks to be processed.
-        for _ in 0..100 {
-            agent.pic().advance_time(Duration::from_secs(1)).await;
-            agent.pic().tick().await;
-        }
-    }
     // At this point pool has more SNS than ICP
     {
-        let balances_request = BalancesRequest {};
-        let balances = agent
-            .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
-            .call(kong_adaptor_canister_id, balances_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let asset_to_balance = balances.asset_to_balances.unwrap();
-        let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
-        let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
+        let (balances_0, balances_1) = get_balances(&mut agent, kong_adaptor_canister_id).await;
 
         assert!(
             balances_0
@@ -414,21 +180,7 @@ async fn lifecycle_test() {
     }
     // VI: final phase: withdrawal
     {
-        let withdraw_request = WithdrawRequest {
-            withdraw_accounts: None,
-        };
-
-        let response = agent
-            .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
-            .call(kong_adaptor_canister_id, withdraw_request)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let asset_to_balance = response.asset_to_balances.unwrap();
-        let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
-        let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
-
+        let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
         assert_eq!(
             balances_0.fee_collector.as_ref().unwrap().amount_decimals,
             Nat::from(8 * FEE_SNS)
@@ -457,6 +209,239 @@ async fn lifecycle_test() {
             "There should be no ICP left in the DEX"
         );
     }
+}
+
+async fn setup_kongswap_adaptor(
+    agent: &mut PocketIcAgent,
+    sns_ledger_canister_id: Principal,
+    icp_ledger_canister_id: Principal,
+    kong_adaptor_canister_id: Principal,
+    wasm: &Wasm,
+    treasury_icp_account: sns_treasury_manager::Account,
+    treasury_sns_account: sns_treasury_manager::Account,
+) {
+    let initial_deposit = 100 * E8;
+    mint_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        sns_ledger_canister_id,
+        Account {
+            owner: kong_adaptor_canister_id,
+            subaccount: None,
+        },
+        initial_deposit,
+    )
+    .await;
+
+    mint_tokens(
+        agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
+        icp_ledger_canister_id,
+        Account {
+            owner: kong_adaptor_canister_id,
+            subaccount: None,
+        },
+        initial_deposit,
+    )
+    .await;
+
+    install_kong_adaptor(
+        &agent.pic(),
+        wasm.clone(),
+        kong_adaptor_canister_id,
+        treasury_icp_account,
+        treasury_sns_account,
+        initial_deposit,
+        initial_deposit,
+    )
+    .await;
+
+    // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
+    // tasks to be processed.
+    for _ in 0..100 {
+        agent.pic().advance_time(Duration::from_secs(1)).await;
+        agent.pic().tick().await;
+    }
+}
+
+async fn deposit(
+    agent: &mut PocketIcAgent,
+    sns_ledger_canister_id: Principal,
+    icp_ledger_canister_id: Principal,
+    kong_adaptor_canister_id: Principal,
+    treasury_sns_account: sns_treasury_manager::Account,
+    treasury_icp_account: sns_treasury_manager::Account,
+    topup: u64,
+) {
+    // let topup = 10 * E8;
+    mint_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        sns_ledger_canister_id,
+        Account {
+            owner: kong_adaptor_canister_id,
+            subaccount: None,
+        },
+        topup,
+    )
+    .await;
+
+    mint_tokens(
+        agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
+        icp_ledger_canister_id,
+        Account {
+            owner: kong_adaptor_canister_id,
+            subaccount: None,
+        },
+        topup,
+    )
+    .await;
+
+    let deposit_request = DepositRequest {
+        allowances: vec![
+            Allowance {
+                asset: SNS_ASSET.clone(),
+                amount_decimals: Nat::from(topup),
+                owner_account: treasury_sns_account,
+            },
+            Allowance {
+                amount_decimals: Nat::from(topup),
+                asset: ICP_ASSET.clone(),
+                owner_account: treasury_icp_account,
+            },
+        ],
+    };
+
+    let _deposit_response = agent
+        .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
+        .call(kong_adaptor_canister_id, deposit_request)
+        .await
+        .unwrap()
+        .unwrap();
+
+    for _ in 0..10 {
+        agent.pic().advance_time(Duration::from_secs(1)).await;
+        agent.pic().tick().await;
+    }
+}
+
+async fn trade(
+    agent: &mut PocketIcAgent,
+    sns_ledger_canister_id: Principal,
+    icp_ledger_canister_id: Principal,
+    trader_balance: u64,
+    trade_sns: bool,
+) {
+    let (fee, ledger_canister_id, pay_token, receive_token, minter_account) = if trade_sns {
+        (
+            FEE_SNS,
+            sns_ledger_canister_id,
+            format!("IC.{}", sns_ledger_canister_id),
+            format!("IC.{}", icp_ledger_canister_id),
+            *SNS_GOVERNANCE_CANISTER_ID,
+        )
+    } else {
+        (
+            FEE_ICP,
+            icp_ledger_canister_id,
+            format!("IC.{}", icp_ledger_canister_id),
+            format!("IC.{}", sns_ledger_canister_id),
+            *NNS_GOVERNANCE_CANISTER_ID,
+        )
+    };
+
+    mint_tokens(
+        agent.with_sender(minter_account),
+        ledger_canister_id,
+        Account {
+            owner: TRADER_PRINCIPAL_ID.clone(),
+            subaccount: None,
+        },
+        trader_balance,
+    )
+    .await;
+
+    // First we give allowance to the Kongswap backend
+    let approve_request = ApproveArgs {
+        from_subaccount: None,
+        spender: Account {
+            owner: *KONGSWAP_BACKEND_CANISTER_ID,
+            subaccount: None,
+        },
+        amount: Nat::from(trader_balance - fee),
+        expected_allowance: Some(Nat::from(0u8)),
+        expires_at: Some(u64::MAX),
+        memo: None,
+        created_at_time: None,
+        fee: Some(Nat::from(fee)),
+    };
+
+    let _approve_args_response = agent
+        .with_sender(TRADER_PRINCIPAL_ID.clone())
+        .call(ledger_canister_id, approve_request)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let swap_request = SwapArgs {
+        pay_token,
+        pay_amount: Nat::from(trader_balance - 2 * fee),
+        pay_tx_id: None,
+        receive_token,
+        receive_amount: None,
+        receive_address: None,
+        max_slippage: Some(10.0),
+        referred_by: None,
+    };
+
+    let _response = agent
+        .with_sender(TRADER_PRINCIPAL_ID.clone())
+        .call(*KONGSWAP_BACKEND_CANISTER_ID, swap_request)
+        .await
+        .unwrap()
+        .unwrap();
+
+    for _ in 0..10 {
+        agent.pic().advance_time(Duration::from_secs(1)).await;
+        agent.pic().tick().await;
+    }
+}
+
+async fn get_balances(
+    agent: &mut PocketIcAgent,
+    kong_adaptor_canister_id: Principal,
+) -> (BalanceBook, BalanceBook) {
+    let balances_request = BalancesRequest {};
+    let balances = agent
+        .call(kong_adaptor_canister_id, balances_request)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let asset_to_balance = balances.asset_to_balances.unwrap();
+    let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
+    let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
+
+    (balances_0.clone(), balances_1.clone())
+}
+
+async fn withdraw(
+    agent: &mut PocketIcAgent,
+    kong_adaptor_canister_id: Principal,
+) -> (BalanceBook, BalanceBook) {
+    let withdraw_request = WithdrawRequest {
+        withdraw_accounts: None,
+    };
+
+    let response = agent
+        .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
+        .call(kong_adaptor_canister_id, withdraw_request)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let asset_to_balance = response.asset_to_balances.unwrap();
+    let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
+    let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
+
+    (balances_0.clone(), balances_1.clone())
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
@@ -505,7 +490,12 @@ async fn install_kong_adaptor(
     let arg = candid::encode_one(&arg).unwrap();
 
     pocket_ic
-        .install_canister(canister_id, wasm.bytes(), arg, Some(*SNS_ROOT_CANISTER_ID))
+        .install_canister(
+            canister_id,
+            wasm.bytes(),
+            arg,
+            Some(*SNS_GOVERNANCE_CANISTER_ID),
+        )
         .await;
 
     let subnet_id = pocket_ic.get_subnet(canister_id).await.unwrap();
@@ -515,7 +505,7 @@ async fn install_kong_adaptor(
     );
 }
 
-async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
+async fn install_kong_swap(pocket_ic: &PocketIc) {
     // Install KongSwap
     let wasm_path = std::env::var("KONG_BACKEND_CANISTER_WASM_PATH")
         .expect("KONG_BACKEND_CANISTER_WASM_PATH must be set.");
@@ -535,8 +525,6 @@ async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
         controllers,
     )
     .await;
-
-    canister_id
 }
 
 async fn mint_tokens<Agent>(

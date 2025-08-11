@@ -28,6 +28,9 @@ lazy_static! {
     static ref SNS_LEDGER_CANISTER_ID: Principal =
         Principal::from_text("jg2ra-syaaa-aaaaq-aaewa-cai").unwrap();
 
+    static ref SNS_ROOT_CANISTER_ID: Principal =
+        Principal::from_text("ju4gz-6iaaa-aaaaq-aaeva-cai").unwrap();
+
     static ref SNS_GOVERNANCE_CANISTER_ID: Principal =
         Principal::from_text("jt5an-tqaaa-aaaaq-aaevq-cai").unwrap();
 
@@ -62,8 +65,8 @@ async fn e2e_test() {
     let topology = agent.pic().topology().await;
     let fiduciary_subnet_id = topology.get_fiduciary().unwrap();
 
-    let _kong_backend_canister_id = install_kong_swap(&agent.pic()).await;
-    let sns_ledger_canister_ic = install_sns_ledger(&agent.pic()).await;
+    install_kong_swap(&agent.pic()).await;
+    let sns_ledger_canister_id = install_sns_ledger(&agent.pic()).await;
     let icp_ledger_canister_id = install_icp_ledger(&agent.pic()).await;
 
     // Install canister under test.
@@ -71,7 +74,7 @@ async fn e2e_test() {
 
     mint_tokens(
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
-        sns_ledger_canister_ic,
+        sns_ledger_canister_id,
         Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
@@ -229,7 +232,7 @@ async fn e2e_test() {
 }
 
 async fn create_kong_adaptor(pocket_ic: &PocketIc, subnet_id: Principal) -> Principal {
-    let controllers = vec![*SNS_GOVERNANCE_CANISTER_ID];
+    let controllers = vec![*SNS_ROOT_CANISTER_ID, *SNS_GOVERNANCE_CANISTER_ID];
 
     let (canister_id, _) = create_canister_with_controllers(
         pocket_ic,
@@ -301,7 +304,7 @@ async fn install_kong_adaptor(
     );
 }
 
-async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
+async fn install_kong_swap(pocket_ic: &PocketIc) {
     // Install KongSwap
     let wasm_path = std::env::var("KONG_BACKEND_CANISTER_WASM_PATH")
         .expect("KONG_BACKEND_CANISTER_WASM_PATH must be set.");
@@ -321,8 +324,6 @@ async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
         controllers,
     )
     .await;
-
-    canister_id
 }
 
 async fn mint_tokens<Agent>(
@@ -355,11 +356,10 @@ async fn install_sns_ledger(pocket_ic: &PocketIc) -> Principal {
 
     let icrc1_wasm = Wasm::from_file(wasm_path);
 
-    let owner = *SNS_GOVERNANCE_CANISTER_ID;
-    let controllers = vec![owner];
+    let controllers = vec![*SNS_ROOT_CANISTER_ID];
 
     let arg = InitArgsBuilder::with_symbol_and_name("SNS", "My DAO Token")
-        .with_minting_account(owner)
+        .with_minting_account(*SNS_GOVERNANCE_CANISTER_ID)
         .build();
 
     let arg = LedgerArgument::Init(arg);
