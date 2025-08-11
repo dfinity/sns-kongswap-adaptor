@@ -56,6 +56,48 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .await
             .map_err(|err| vec![err])?;
 
+        let balances_after = self.get_ledger_balances(context).await?;
+
+        // When withdrawing from the DEX, transferring tokens could fail.
+        // In this case, kongswap backend reutrns a non-empty `claim_ids`.
+        // Here, we try to find out which token has been successfully
+        // withdrawn and update the balanaces accordingly.
+        if balances_after.0 > balances_before.0 {
+            let amount_0 = logged_saturating_add(
+                decode_nat_to_u64(amount_0).unwrap(),
+                decode_nat_to_u64(lp_fee_0).unwrap(),
+            );
+
+            self.find_discrepency(
+                asset_0,
+                balances_before.0,
+                balances_after.0,
+                amount_0,
+                false,
+            );
+            self.move_asset(asset_0, amount_0, Party::External, Party::TreasuryManager);
+        }
+
+        if balances_after.1 > balances_before.1 {
+            let amount_1 = logged_saturating_add(
+                decode_nat_to_u64(amount_1).unwrap(),
+                decode_nat_to_u64(lp_fee_1).unwrap(),
+            );
+            self.find_discrepency(
+                asset_1,
+                balances_before.1,
+                balances_after.1,
+                amount_1,
+                false,
+            );
+            self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
+        }
+
+        // If we have a non-empty `claim_ids`, we are going to return
+        // an Error, indicating the the withdrawal from the DEX, was
+        // incomplete or unsuccessful.
+        // It wouldn't break our accounting, as we have already updated
+        // the balances if any transfer has been successful.
         if !claim_ids.is_empty() {
             let claim_ids = claim_ids
                 .iter()
@@ -71,35 +113,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 kind: ErrorKind::Backend {},
             }]);
         }
-
-        let balances_after = self.get_ledger_balances(context).await?;
-
-        // TODO Unwrapping
-        let amount_0 = logged_saturating_add(
-            decode_nat_to_u64(amount_0).unwrap(),
-            decode_nat_to_u64(lp_fee_0).unwrap(),
-        );
-        let amount_1 = logged_saturating_add(
-            decode_nat_to_u64(amount_1).unwrap(),
-            decode_nat_to_u64(lp_fee_1).unwrap(),
-        );
-
-        self.find_discrepency(
-            asset_0,
-            balances_before.0,
-            balances_after.0,
-            amount_0,
-            false,
-        );
-        self.find_discrepency(
-            asset_1,
-            balances_before.1,
-            balances_after.1,
-            amount_1,
-            false,
-        );
-        self.move_asset(asset_0, amount_0, Party::External, Party::TreasuryManager);
-        self.move_asset(asset_1, amount_1, Party::External, Party::TreasuryManager);
 
         Ok(())
     }
@@ -155,6 +168,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     ..
                 }) => {
                     if let Some(asset) = self.get_asset_for_ledger(&canister_id) {
+                        let (balances_before, balances_after) = if asset == self.assets().0 {
+                            (balances_before.0, balances_after.0)
+                        } else {
+                            (balances_before.1, balances_after.1)
+                        };
+
                         match decode_nat_to_u64(amount) {
                             Ok(amount) => {
                                 self.move_asset(
@@ -165,8 +184,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                                 );
                                 self.find_discrepency(
                                     asset,
-                                    balances_before.0,
-                                    balances_after.0,
+                                    balances_before,
+                                    balances_after,
                                     amount,
                                     false,
                                 );
@@ -239,6 +258,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 mod test {
     mod withdraw_happy_path;
 
-    #[cfg(test)]
     mod withdraw_retry;
+
+    mod withdraw_failed_dex_withdraw;
 }
