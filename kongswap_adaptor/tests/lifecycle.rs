@@ -1,7 +1,6 @@
 mod helpers;
 mod kongswap_types;
 mod pocket_ic_agent;
-
 use candid::{Nat, Principal};
 use helpers::Wasm;
 use ic_icrc1_ledger::{InitArgsBuilder, LedgerArgument};
@@ -19,8 +18,8 @@ use pocket_ic_agent::PocketIcAgent;
 use pretty_assertions::assert_eq;
 use sha2::Digest;
 use sns_treasury_manager::{
-    self, Allowance, Asset, BalanceBook, BalancesRequest, DepositRequest, TreasuryManagerArg,
-    TreasuryManagerInit, WithdrawRequest,
+    self, Allowance, Asset, BalanceBook, DepositRequest, TreasuryManagerArg, TreasuryManagerInit,
+    WithdrawRequest,
 };
 use std::time::Duration;
 
@@ -56,14 +55,18 @@ lazy_static! {
 
     static ref TRADER_PRINCIPAL_ID: Principal = Principal::from_text("zmbi7-fyaaa-aaaaq-aaahq-cai").unwrap();
 
+    static ref SYMBOL_0: String = "SNS".to_string();
+
+    static ref SYMBOL_1: String = "ICP".to_string();
+
     static ref SNS_ASSET: Asset = Asset::Token {
-        symbol: "SNS".to_string(),
+        symbol: SYMBOL_0.clone(),
         ledger_canister_id: *SNS_LEDGER_CANISTER_ID,
         ledger_fee_decimals: Nat::from(FEE_SNS),
     };
 
     static ref ICP_ASSET: Asset = Asset::Token {
-        symbol: "ICP".to_string(),
+        symbol: SYMBOL_1.clone(),
         ledger_canister_id: *ICP_LEDGER_CANISTER_ID,
         ledger_fee_decimals: Nat::from(FEE_ICP),
     };
@@ -108,6 +111,12 @@ async fn lifecycle_test() {
     let original_wasm = get_kong_adaptor_wasm();
 
     // Phase I: setup the canister
+    // When we freshly deploy the pool, the desired amounts of both
+    // tokens are moved to the pool. Therefore, we expect
+    // SNS:
+    //      reserve_sns = 100 * E8 - 2 * FEE_SNS
+    // ICP:
+    //      reserve_icp = 100 * E8 - 2 * FEE_ICP
     setup_kongswap_adaptor(
         &mut agent,
         sns_ledger_canister_id,
@@ -116,10 +125,17 @@ async fn lifecycle_test() {
         &original_wasm,
         treasury_icp_account,
         treasury_sns_account,
+        100 * E8,
     )
     .await;
 
     // Phase II: another deposit
+    // As the second deposit is proportional to the existing reserves
+    // of the pool, it gets thoroughly transferred to the pool
+    // SNS:
+    //      reserve_sns += 10 - 2 * FEE_SNS
+    // ICP:
+    //      reserve_icp += 10 - 2 * FEE_ICP
     deposit(
         &mut agent,
         sns_ledger_canister_id,
@@ -131,6 +147,15 @@ async fn lifecycle_test() {
     )
     .await;
     // Phase III: first trade
+    // Here, we try to swap 1 * E8 of SNS and receive ICP in return.
+    // The amount of ICP withdrawn from the kongswap backend is
+    // amount_icp = amount_sns * reserve_icp / (reserve_sns + amount_sns)
+    // where amount_sns = 1 * E8 - 2 * FEE_SNS
+    // SNS:
+    //      reserve_sns += amount_sns
+    // ICP:
+    //      reserve_icp -= amount_icp
+    //      lp_fee_1 = 30 * amount_icp / 10_000
     trade(
         &mut agent,
         sns_ledger_canister_id,
@@ -140,6 +165,15 @@ async fn lifecycle_test() {
     )
     .await;
     // Phase IV: another deposit
+    // Now, as the pool is no longer in 1:1 price point, and we have more SNS
+    // some amount of ICP will be returned to the user (one more fee)
+    // The amount of icp to be moved into the pool is calculated as
+    // amount_icp = (reserve_icp / reserve_sns) * deposit_amount
+    // where depoit_amount = 10 * E8 - 2 * FEE_SNS
+    // SNS:
+    //      reserve_0 += deposit_amount
+    // ICP:
+    //      reserve_1 += amount_icp calculated above
     deposit(
         &mut agent,
         sns_ledger_canister_id,
@@ -151,6 +185,16 @@ async fn lifecycle_test() {
     )
     .await;
     // Phase V: second trade
+    // Here, we try to swap 1 * E8 of ICP and receive SNS in return.
+    // The amount of SNS withdrawn from the kongswap backend is
+    // amount_sns = amount_icp * reserve_sns / (reserve_icp + amount_icp)
+    // where amount_icp = 1 * E8 - 2 * FEE_ICP
+    // SNS:
+    //      reserve_sns= 121 * E8 - 8 * FEE_SNS - amount_sns
+    //      lp_fee_0 = 30 * amount_sns / 10_000
+    // ICP:
+    //      reserve_icp += E8
+    //      lp_fee_1 = 30 * amount_icp / 10_000
     trade(
         &mut agent,
         sns_ledger_canister_id,
@@ -160,24 +204,6 @@ async fn lifecycle_test() {
     )
     .await;
 
-    // At this point pool has more SNS than ICP
-    {
-        let (balances_0, balances_1) = get_balances(&mut agent, kong_adaptor_canister_id).await;
-
-        assert!(
-            balances_0
-                .external_custodian
-                .as_ref()
-                .unwrap()
-                .amount_decimals
-                > balances_1
-                    .external_custodian
-                    .as_ref()
-                    .unwrap()
-                    .amount_decimals,
-            "We expect to have more SNS in the pool than ICP"
-        );
-    }
     // VI: final phase: withdrawal
     {
         let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
@@ -208,6 +234,15 @@ async fn lifecycle_test() {
             Nat::from(0_u64),
             "There should be no ICP left in the DEX"
         );
+
+        assert_eq!(
+            balances_0.treasury_owner.as_ref().unwrap().amount_decimals,
+            Nat::from(11999249291_u64)
+        );
+        assert_eq!(
+            balances_1.treasury_owner.as_ref().unwrap().amount_decimals,
+            Nat::from(12001107784_u64)
+        );
     }
 }
 
@@ -219,8 +254,8 @@ async fn setup_kongswap_adaptor(
     wasm: &Wasm,
     treasury_icp_account: sns_treasury_manager::Account,
     treasury_sns_account: sns_treasury_manager::Account,
+    initial_deposit: u64,
 ) {
-    let initial_deposit = 100 * E8;
     mint_tokens(
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
         sns_ledger_canister_id,
@@ -271,7 +306,6 @@ async fn deposit(
     treasury_icp_account: sns_treasury_manager::Account,
     topup: u64,
 ) {
-    // let topup = 10 * E8;
     mint_tokens(
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
         sns_ledger_canister_id,
@@ -315,11 +349,6 @@ async fn deposit(
         .await
         .unwrap()
         .unwrap();
-
-    for _ in 0..10 {
-        agent.pic().advance_time(Duration::from_secs(1)).await;
-        agent.pic().tick().await;
-    }
 }
 
 async fn trade(
@@ -402,24 +431,6 @@ async fn trade(
         agent.pic().advance_time(Duration::from_secs(1)).await;
         agent.pic().tick().await;
     }
-}
-
-async fn get_balances(
-    agent: &mut PocketIcAgent,
-    kong_adaptor_canister_id: Principal,
-) -> (BalanceBook, BalanceBook) {
-    let balances_request = BalancesRequest {};
-    let balances = agent
-        .call(kong_adaptor_canister_id, balances_request)
-        .await
-        .unwrap()
-        .unwrap();
-
-    let asset_to_balance = balances.asset_to_balances.unwrap();
-    let balances_0 = asset_to_balance.get(&SNS_ASSET).unwrap();
-    let balances_1 = asset_to_balance.get(&ICP_ASSET).unwrap();
-
-    (balances_0.clone(), balances_1.clone())
 }
 
 async fn withdraw(
