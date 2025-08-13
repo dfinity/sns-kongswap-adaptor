@@ -65,7 +65,7 @@ async fn e2e_test() {
     let topology = agent.pic().topology().await;
     let fiduciary_subnet_id = topology.get_fiduciary().unwrap();
 
-    let _kong_backend_canister_id = install_kong_swap(&agent.pic()).await;
+    install_kong_swap(&agent.pic()).await;
     let sns_ledger_canister_id = install_sns_ledger(&agent.pic()).await;
     let icp_ledger_canister_id = install_icp_ledger(&agent.pic()).await;
 
@@ -276,12 +276,12 @@ async fn install_kong_adaptor(
             Allowance {
                 asset: sns_asset,
                 amount_decimals: Nat::from(amount_sns_e8s),
-                owner_account: treasury_icp_account,
+                owner_account: treasury_sns_account,
             },
             Allowance {
                 amount_decimals: Nat::from(amount_icp_e8s),
                 asset: icp_asset,
-                owner_account: treasury_sns_account,
+                owner_account: treasury_icp_account,
             },
         ],
     });
@@ -304,7 +304,7 @@ async fn install_kong_adaptor(
     );
 }
 
-async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
+async fn install_kong_swap(pocket_ic: &PocketIc) {
     // Install KongSwap
     let wasm_path = std::env::var("KONG_BACKEND_CANISTER_WASM_PATH")
         .expect("KONG_BACKEND_CANISTER_WASM_PATH must be set.");
@@ -324,8 +324,6 @@ async fn install_kong_swap(pocket_ic: &PocketIc) -> Principal {
         controllers,
     )
     .await;
-
-    canister_id
 }
 
 async fn mint_tokens<Agent>(
