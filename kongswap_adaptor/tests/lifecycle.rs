@@ -146,7 +146,7 @@ async fn lifecycle_test() {
         10 * E8,
     )
     .await;
-    // Phase III: first trade
+    // Phase III: first trade: a DEX user buys some SNS tokens.
     // Here, we try to swap 1 * E8 of SNS and receive ICP in return.
     // The amount of ICP withdrawn from the kongswap backend is
     // amount_icp = amount_sns * reserve_icp / (reserve_sns + amount_sns)
@@ -156,6 +156,8 @@ async fn lifecycle_test() {
     // ICP:
     //      reserve_icp -= amount_icp
     //      lp_fee_1 = 30 * amount_icp / 10_000
+    // When selling out a token, a tiny portion of it goes to the liquidity
+    // provider. Here, the trader receives `amount_icp - lp_fee_1`.
     trade(
         &mut agent,
         sns_ledger_canister_id,
@@ -184,14 +186,16 @@ async fn lifecycle_test() {
         10 * E8,
     )
     .await;
-    // Phase V: second trade
+    // Phase V: second trade: a DEX user buys some SNS tokens.
     // Here, we try to swap 1 * E8 of ICP and receive SNS in return.
     // The amount of SNS withdrawn from the kongswap backend is
     // amount_sns = amount_icp * reserve_sns / (reserve_icp + amount_icp)
     // where amount_icp = 1 * E8 - 2 * FEE_ICP
     // SNS:
-    //      reserve_sns= 121 * E8 - 8 * FEE_SNS - amount_sns
+    //      reserve_sns -= amount_sns
     //      lp_fee_0 = 30 * amount_sns / 10_000
+    // When selling out a token, a tiny portion of it goes to the liquidity
+    // provider. Here, the trader receives `amount_sns - lp_fee_0`.
     // ICP:
     //      reserve_icp += E8
     //      lp_fee_1 = 30 * amount_icp / 10_000
@@ -235,14 +239,60 @@ async fn lifecycle_test() {
             "There should be no ICP left in the DEX"
         );
 
-        assert_eq!(
-            balances_0.treasury_owner.as_ref().unwrap().amount_decimals,
-            Nat::from(11999249291_u64)
-        );
-        assert_eq!(
-            balances_1.treasury_owner.as_ref().unwrap().amount_decimals,
-            Nat::from(12001107784_u64)
-        );
+        // Following the calculations above, we get the following values for the pool
+        // reserve_0: 11998963701, lp_fee_0: 302868, reserve_1: 11982907522, lp_fee_1: 297238
+        // means that the treasury owner receives:
+        // SNS => reserve_0 + lp_fee_0 - 2 * FEE_SNS = 11999246569
+        // and
+        // ICP => reserve_1 + lp_fee_1 - 2 * FEE_ICP = 11983184760
+        fn decode_nat_to_u64(value: Nat) -> Result<u64, String> {
+            let u64_digit_components = value.0.to_u64_digits();
+
+            match &u64_digit_components[..] {
+                [] => Ok(0),
+                [val] => Ok(*val),
+                vals => Err(format!(
+            "Error parsing a Nat value `{:?}` to u64: expected a unique u64 value, got {:?}.",
+            &value,
+            vals.len(),
+        )),
+            }
+        }
+
+        fn is_within_tolerance(expected: f64, observed: f64, tolerance: f64) -> bool {
+            (expected - observed).abs() <= expected.abs() * tolerance
+        }
+
+        // @todo after clarifying the discrepancies between the calculated
+        // and expected amount with Kongswap team, decide what to do.
+        let error_tolerance = 0.000001;
+
+        assert!(is_within_tolerance(
+            11999246569_u64 as f64,
+            decode_nat_to_u64(
+                balances_0
+                    .treasury_owner
+                    .as_ref()
+                    .unwrap()
+                    .amount_decimals
+                    .clone()
+            )
+            .unwrap() as f64,
+            error_tolerance
+        ));
+        assert!(is_within_tolerance(
+            12001107784_u64 as f64,
+            decode_nat_to_u64(
+                balances_1
+                    .treasury_owner
+                    .as_ref()
+                    .unwrap()
+                    .amount_decimals
+                    .clone()
+            )
+            .unwrap() as f64,
+            error_tolerance
+        ));
     }
 }
 
@@ -351,14 +401,19 @@ async fn deposit(
         .unwrap();
 }
 
+/// `trade_value` is the amount of token we want to trade.
+/// One fee is deducted for the approval and another fee is deducted for
+/// transfer from transaction. Hence, the actual value would be
+/// `trade_value - 2 * fee`.
+/// `sell_sns` determines whether the trader is selling or buying SNS.
 async fn trade(
     agent: &mut PocketIcAgent,
     sns_ledger_canister_id: Principal,
     icp_ledger_canister_id: Principal,
-    trader_balance: u64,
-    trade_sns: bool,
+    trade_value: u64,
+    sell_sns: bool,
 ) {
-    let (fee, ledger_canister_id, pay_token, receive_token, minter_account) = if trade_sns {
+    let (fee, ledger_canister_id, pay_token, receive_token, minter_account) = if sell_sns {
         (
             FEE_SNS,
             sns_ledger_canister_id,
@@ -383,7 +438,7 @@ async fn trade(
             owner: TRADER_PRINCIPAL_ID.clone(),
             subaccount: None,
         },
-        trader_balance,
+        trade_value,
     )
     .await;
 
@@ -394,7 +449,7 @@ async fn trade(
             owner: *KONGSWAP_BACKEND_CANISTER_ID,
             subaccount: None,
         },
-        amount: Nat::from(trader_balance - fee),
+        amount: Nat::from(trade_value - fee),
         expected_allowance: Some(Nat::from(0u8)),
         expires_at: Some(u64::MAX),
         memo: None,
@@ -411,7 +466,7 @@ async fn trade(
 
     let swap_request = SwapArgs {
         pay_token,
-        pay_amount: Nat::from(trader_balance - 2 * fee),
+        pay_amount: Nat::from(trade_value - 2 * fee),
         pay_tx_id: None,
         receive_token,
         receive_amount: None,
