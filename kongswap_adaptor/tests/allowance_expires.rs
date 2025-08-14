@@ -117,7 +117,6 @@ async fn allowance_test() {
     )
     .await;
 
-    agent.pic().tick().await;
     agent.pic().advance_time(Duration::from_secs(4000)).await;
     // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
     // tasks to be processed.
