@@ -15,10 +15,6 @@ path = "src/lib.rs"
 name = "kongswap-adaptor-canister"
 path = "src/canister.rs"
 
-[[test]]
-name = "e2e"
-path = "tests/e2e.rs"
-
 [dependencies]
 candid = { workspace = true }
 ic-cdk = { workspace = true }
