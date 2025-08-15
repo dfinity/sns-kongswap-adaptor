@@ -77,7 +77,11 @@ def main():
     if args.unit_only:
         cargo_test_cmd.extend(["--bin", "kongswap-adaptor-canister"])
     elif args.integration_only:
-        cargo_test_cmd.extend(["--test", "e2e"])
+        tests_dir = paths['kongswap_dir'] / "tests"
+        for test_file in tests_dir.glob("*.rs"):
+            print(f"new test file: {test_file}")
+            test_name = test_file.stem  # filename without .rs
+            cargo_test_cmd.extend(["--test", test_name])
     
     if args.test_name:
         cargo_test_cmd.append(args.test_name)

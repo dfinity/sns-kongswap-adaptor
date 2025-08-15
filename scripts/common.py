@@ -66,6 +66,7 @@ def get_project_paths():
     return {
         'ic_dir': IC_DIR,
         'project_dir': PROJECT_DIR,
+        'kongswap_dir': PROJECT_DIR / "kongswap_adaptor",
         'wasm_dir': WASM_DIR,
         'candid': CANDID,
         'kongswap_canister': "kongswap-adaptor-canister.wasm",
