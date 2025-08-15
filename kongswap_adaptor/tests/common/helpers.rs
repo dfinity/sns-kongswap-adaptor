@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{fs::File, io::Read, path::Path};
 
 #[derive(Clone)]
