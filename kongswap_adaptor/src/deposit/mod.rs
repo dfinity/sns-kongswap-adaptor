@@ -9,7 +9,10 @@ use crate::{
     KongSwapAdaptor, KONG_BACKEND_CANISTER_ID,
 };
 use candid::Nat;
-use icrc_ledger_types::{icrc1::account::Account, icrc2::approve::ApproveArgs};
+use icrc_ledger_types::{
+    icrc1::account::Account,
+    icrc2::{approve::ApproveArgs, transfer_from::TransferFromArgs},
+};
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
 use sns_treasury_manager::{Error, ErrorKind};
 
@@ -348,12 +351,90 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         Ok(())
     }
 
+    async fn transfer_from_owner_impl(
+        &mut self,
+        context: &mut OperationContext,
+        allowance: &ValidatedAllowance,
+    ) -> Result<u64, Error> {
+        let ValidatedAllowance {
+            asset,
+            amount_decimals,
+            owner_account,
+        } = allowance;
+
+        let human_readable = format!(
+            "Calling ICRC2 transfer_from to receive {} from the treasury owner.",
+            asset.symbol()
+        );
+
+        let canister_id = asset.ledger_canister_id();
+        let fee_decimals = asset.ledger_fee_decimals();
+
+        // one fee is deducted as fee for the issuance of the approval
+        // the other one is the ledger transfer fee.
+        let received_amount_decimals = amount_decimals - 2 * fee_decimals;
+        let amount = Nat::from(received_amount_decimals);
+
+        let fee_decimals = Nat::from(fee_decimals);
+        let fee = Some(fee_decimals.clone());
+
+        let request = TransferFromArgs {
+            spender_subaccount: None,
+            from: *owner_account,
+            to: Account {
+                owner: self.id,
+                subaccount: None,
+            },
+            fee,
+            amount,
+            created_at_time: None,
+            memo: None,
+        };
+
+        // Fail early if at least one of the allowances fails.
+        self.emit_transaction(
+            context.next_operation(),
+            canister_id,
+            request,
+            human_readable,
+        )
+        .await?;
+
+        Ok(received_amount_decimals)
+    }
+
+    async fn transfer_from_owner(
+        &mut self,
+        context: &mut OperationContext,
+        allowance_0: &ValidatedAllowance,
+        allowance_1: &ValidatedAllowance,
+    ) -> Result<(ValidatedAllowance, ValidatedAllowance), Error> {
+        let received_amount_decimals_0 =
+            self.transfer_from_owner_impl(context, allowance_0).await?;
+        let received_amount_decimals_1 =
+            self.transfer_from_owner_impl(context, allowance_1).await?;
+
+        let mut allowance_0 = allowance_0.clone();
+        allowance_0.amount_decimals = received_amount_decimals_0;
+
+        let mut allowance_1 = allowance_1.clone();
+        allowance_1.amount_decimals = received_amount_decimals_1;
+
+        Ok((allowance_0, allowance_1))
+    }
+
     pub async fn deposit_impl(
         &mut self,
         context: &mut OperationContext,
         allowance_0: ValidatedAllowance,
         allowance_1: ValidatedAllowance,
     ) -> Result<ValidatedBalances, Vec<Error>> {
+        // Transfer for the assets SNS has gave approval
+        let (allowance_0, allowance_1) = self
+            .transfer_from_owner(context, &allowance_0, &allowance_1)
+            .await
+            .map_err(|err| vec![err])?;
+
         {
             self.add_manager_balance(allowance_0.asset, allowance_0.amount_decimals);
             self.add_manager_balance(allowance_1.asset, allowance_1.amount_decimals);
