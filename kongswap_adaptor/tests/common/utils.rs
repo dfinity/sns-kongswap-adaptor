@@ -7,7 +7,10 @@ use ic_icrc1_ledger::{InitArgsBuilder, LedgerArgument};
 use ic_management_canister_types::CanisterSettings;
 use icp_ledger::{AccountIdentifier, LedgerCanisterInitPayload};
 use icrc_ledger_types::{
-    icrc1::{account::Account, transfer::TransferArg},
+    icrc1::{
+        account::{Account, Subaccount},
+        transfer::TransferArg,
+    },
     icrc2::approve::ApproveArgs,
 };
 use kongswap_adaptor::agent::AbstractAgent;
@@ -20,6 +23,9 @@ use sns_treasury_manager::{
 };
 
 use crate::common::{helpers::Wasm, kongswap_types::SwapArgs, pocket_ic_agent::PocketIcAgent};
+
+/// The static MEMO used when calculating the SNS Treasury subaccount.
+const TREASURY_SUBACCOUNT_NONCE: u64 = 0;
 
 pub(crate) const STARTING_CYCLES_PER_CANISTER: u128 = 2_000_000_000_000_000;
 pub(crate) const FEE: u64 = 10_000;
@@ -214,6 +220,34 @@ pub(crate) async fn mint_tokens<Agent>(
         .unwrap();
 }
 
+pub(crate) async fn approve_tokens<Agent>(
+    agent: &mut Agent,
+    icrc1_ledger_canister_id: Principal,
+    beneficiary_account: Account,
+    amount_e8s: u64,
+    fee: u64,
+    from_subaccount: Option<Subaccount>,
+) where
+    Agent: AbstractAgent,
+{
+    let request = ApproveArgs {
+        from_subaccount,
+        spender: beneficiary_account,
+        amount: Nat::from(amount_e8s - fee),
+        expected_allowance: None,
+        expires_at: Some(u64::MAX),
+        fee: Some(Nat::from(fee)),
+        memo: None,
+        created_at_time: None,
+    };
+
+    let _response = agent
+        .call(icrc1_ledger_canister_id, request)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 pub(crate) async fn install_sns_ledger(pocket_ic: &PocketIc) -> Principal {
     let wasm_path =
         std::env::var("IC_ICRC1_LEDGER_WASM_PATH").expect("IC_ICRC1_LEDGER_WASM_PATH must be set.");
@@ -374,10 +408,23 @@ pub(crate) async fn setup_kongswap_adaptor(
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
         sns_ledger_canister_id,
         Account {
+            owner: TREASURY_SNS_ACCOUNT.owner.clone(),
+            subaccount: TREASURY_SNS_ACCOUNT.subaccount.clone(),
+        },
+        initial_deposit_sns,
+    )
+    .await;
+
+    approve_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        sns_ledger_canister_id,
+        Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
         },
         initial_deposit_sns,
+        FEE_SNS,
+        TREASURY_SNS_ACCOUNT.subaccount.clone(),
     )
     .await;
 
@@ -385,10 +432,23 @@ pub(crate) async fn setup_kongswap_adaptor(
         agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
         icp_ledger_canister_id,
         Account {
+            owner: TREASURY_ICP_ACCOUNT.owner.clone(),
+            subaccount: TREASURY_ICP_ACCOUNT.subaccount.clone(),
+        },
+        initial_deposit_icp,
+    )
+    .await;
+
+    approve_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        icp_ledger_canister_id,
+        Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
         },
         initial_deposit_icp,
+        FEE_ICP,
+        TREASURY_ICP_ACCOUNT.subaccount.clone(),
     )
     .await;
 
@@ -424,10 +484,23 @@ pub(crate) async fn deposit(
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
         sns_ledger_canister_id,
         Account {
+            owner: TREASURY_SNS_ACCOUNT.owner.clone(),
+            subaccount: TREASURY_SNS_ACCOUNT.subaccount.clone(),
+        },
+        topup,
+    )
+    .await;
+
+    approve_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        sns_ledger_canister_id,
+        Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
         },
         topup,
+        FEE_SNS,
+        TREASURY_SNS_ACCOUNT.subaccount.clone(),
     )
     .await;
 
@@ -435,10 +508,23 @@ pub(crate) async fn deposit(
         agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
         icp_ledger_canister_id,
         Account {
+            owner: TREASURY_ICP_ACCOUNT.owner.clone(),
+            subaccount: TREASURY_ICP_ACCOUNT.subaccount.clone(),
+        },
+        topup,
+    )
+    .await;
+
+    approve_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        icp_ledger_canister_id,
+        Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
         },
         topup,
+        FEE_ICP,
+        TREASURY_ICP_ACCOUNT.subaccount.clone(),
     )
     .await;
 
