@@ -4,7 +4,7 @@ use icrc_ledger_types::{
         account::Account,
         transfer::{Memo, TransferArg},
     },
-    icrc2::approve::ApproveArgs,
+    icrc2::{approve::ApproveArgs, transfer_from::TransferFromArgs},
 };
 use lazy_static::lazy_static;
 use sns_treasury_manager::{Asset, BalanceBook, TreasuryManagerOperation};
@@ -392,5 +392,23 @@ pub(crate) fn make_remove_liquidity_amount_reply(
         lp_fee_1: Nat::from(lp_fee_1),
         remove_lp_token_amount: Nat::from(remove_lp_token_amount),
         ..Default::default()
+    }
+}
+
+pub(crate) fn make_transfer_from_request(
+    from: Account,
+    to: Account,
+    fee: u64,
+    amount: u64,
+    operation: TreasuryManagerOperation,
+) -> TransferFromArgs {
+    TransferFromArgs {
+        spender_subaccount: None,
+        from,
+        to,
+        amount: Nat::from(amount),
+        fee: Some(Nat::from(fee)),
+        memo: Some(Memo::from(Vec::<u8>::from(operation))),
+        created_at_time: None,
     }
 }

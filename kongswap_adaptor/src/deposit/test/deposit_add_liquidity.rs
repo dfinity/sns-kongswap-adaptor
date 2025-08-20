@@ -4,7 +4,7 @@ use crate::{
     StableBalances, AUDIT_TRAIL_MEMORY_ID, BALANCES_MEMORY_ID,
 };
 use crate::{test_helpers::*, KONG_BACKEND_CANISTER_ID};
-use candid::{Nat, Principal};
+use candid::Nat;
 use ic_stable_structures::memory_manager::MemoryManager;
 use ic_stable_structures::{Cell as StableCell, DefaultMemoryImpl, Vec as StableVec};
 use icrc_ledger_types::icrc1::account::Account;
@@ -12,33 +12,10 @@ use kongswap_adaptor::agent::mock_agent::MockAgent;
 use maplit::btreemap;
 use pretty_assertions::assert_eq;
 use sns_treasury_manager::{
-    Allowance, Asset, BalanceBook, Balances, DepositRequest, Step, TreasuryManager,
-    TreasuryManagerInit, TreasuryManagerOperation,
+    Allowance, BalanceBook, Balances, DepositRequest, Step, TreasuryManager, TreasuryManagerInit,
+    TreasuryManagerOperation,
 };
 use std::cell::RefCell;
-
-const E8: u64 = 100_000_000;
-const FEE_SNS: u64 = 10_500u64;
-const FEE_ICP: u64 = 9_500u64;
-
-use lazy_static::lazy_static;
-
-lazy_static! {
-    static ref OWNER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
-        owner: Principal::from_text("2vxsx-fae").unwrap(),
-        subaccount: None,
-    };
-    static ref MANAGER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
-        owner: *SELF_CANISTER_ID,
-        subaccount: None,
-    };
-}
-
-lazy_static! {
-    static ref SELF_CANISTER_ID: Principal =
-        Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
-    static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *SELF_CANISTER_ID);
-}
 
 #[tokio::test]
 async fn test_add_liquidity() {
@@ -47,10 +24,10 @@ async fn test_add_liquidity() {
 
     let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+        .external_custodian(amount_0_decimals - 4 * FEE_SNS);
     let asset_1_balance = make_default_balance_book()
         .fee_collector(2 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 2 * FEE_ICP);
+        .external_custodian(amount_1_decimals - 4 * FEE_ICP);
 
     run_add_liquidity_test(
         amount_0_decimals,
@@ -70,10 +47,10 @@ async fn test_add_liquidity_unproportional() {
 
     let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 2 * FEE_SNS);
+        .external_custodian(amount_0_decimals - 4 * FEE_SNS);
     let asset_1_balance = make_default_balance_book()
         .fee_collector(3 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 2 * FEE_ICP - amount_1_remaining)
+        .external_custodian(amount_1_decimals - 4 * FEE_ICP - amount_1_remaining)
         .treasury_owner(amount_1_remaining - FEE_ICP);
 
     run_add_liquidity_test(
@@ -93,28 +70,6 @@ async fn run_add_liquidity_test(
     asset_0_balance: BalanceBook,
     asset_1_balance: BalanceBook,
 ) {
-    let sns_ledger = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
-    let icp_ledger = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
-
-    let token_0 = format!("IC.{}", sns_ledger);
-    let token_1 = format!("IC.{}", icp_ledger);
-
-    let symbol_0 = "DAO".to_string();
-    let symbol_1 = "ICP".to_string();
-
-    // Create test assets and request first
-    let asset_0 = Asset::Token {
-        ledger_canister_id: sns_ledger,
-        symbol: symbol_0.clone(),
-        ledger_fee_decimals: Nat::from(FEE_SNS),
-    };
-
-    let asset_1 = Asset::Token {
-        ledger_canister_id: icp_ledger,
-        symbol: symbol_1.clone(),
-        ledger_fee_decimals: Nat::from(FEE_ICP),
-    };
-
     thread_local! {
         static MEMORY_MANAGER: RefCell<MemoryManager<DefaultMemoryImpl>> =
             RefCell::new(MemoryManager::init(DefaultMemoryImpl::default()));
@@ -144,13 +99,13 @@ async fn run_add_liquidity_test(
     let allowances = vec![
         // SNS
         Allowance {
-            asset: asset_0.clone(),
+            asset: ASSET_0.clone(),
             owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_0_decimals),
         },
         // ICP
         Allowance {
-            asset: asset_1.clone(),
+            asset: ASSET_1.clone(),
             owner_account: *OWNER_ACCOUNT,
             amount_decimals: Nat::from(amount_1_decimals),
         },
@@ -158,32 +113,78 @@ async fn run_add_liquidity_test(
 
     let mut mock_agent = MockAgent::new(*SELF_CANISTER_ID)
         .add_call(
-            sns_ledger,
-            make_approve_request(amount_0_decimals, FEE_SNS),
+            *SNS_LEDGER,
+            make_transfer_from_request(
+                Account {
+                    owner: OWNER_ACCOUNT.owner,
+                    subaccount: None,
+                },
+                Account {
+                    owner: *SELF_CANISTER_ID,
+                    subaccount: None,
+                },
+                FEE_SNS,
+                amount_0_decimals - 2 * FEE_SNS,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 0,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(0_u64)),
+        )
+        .add_call(
+            *ICP_LEDGER,
+            make_transfer_from_request(
+                Account {
+                    owner: OWNER_ACCOUNT.owner,
+                    subaccount: None,
+                },
+                Account {
+                    owner: *SELF_CANISTER_ID,
+                    subaccount: None,
+                },
+                FEE_ICP,
+                amount_1_decimals - 2 * FEE_ICP,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 1,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(1_u64)),
+        )
+        .add_call(
+            *SNS_LEDGER,
+            make_approve_request(amount_0_decimals - 2 * FEE_SNS, FEE_SNS),
             Ok(Nat::from(amount_0_decimals)),
         )
         .add_call(
-            icp_ledger,
-            make_approve_request(amount_1_decimals, FEE_ICP),
+            *ICP_LEDGER,
+            make_approve_request(amount_1_decimals - 2 * FEE_ICP, FEE_ICP),
             Ok(Nat::from(amount_1_decimals)),
         )
         .add_call(
-            sns_ledger,
+            *SNS_LEDGER,
             make_balance_request(),
-            Nat::from(amount_0_decimals - FEE_SNS),
+            Nat::from(amount_0_decimals - 3 * FEE_SNS),
         )
         .add_call(
-            icp_ledger,
+            *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(amount_1_decimals - FEE_ICP),
+            Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_0.clone()),
+            make_add_token_request(TOKEN_0.clone()),
             Ok(make_add_token_reply(
                 1,
                 "IC".to_string(),
-                sns_ledger,
+                *SNS_LEDGER,
                 "My DAO Token".to_string(),
                 "DAO".to_string(),
                 FEE_SNS,
@@ -191,11 +192,11 @@ async fn run_add_liquidity_test(
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
-            make_add_token_request(token_1.clone()),
+            make_add_token_request(TOKEN_1.clone()),
             Ok(make_add_token_reply(
                 2,
                 "IC".to_string(),
-                icp_ledger,
+                *ICP_LEDGER,
                 "Internet Computer".to_string(),
                 "ICP".to_string(),
                 FEE_ICP,
@@ -204,51 +205,54 @@ async fn run_add_liquidity_test(
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_pool_request(
-                token_0.clone(),
-                amount_0_decimals - 2 * FEE_SNS,
-                token_1.clone(),
-                amount_1_decimals - 2 * FEE_ICP,
+                TOKEN_0.clone(),
+                amount_0_decimals - 4 * FEE_SNS,
+                TOKEN_1.clone(),
+                amount_1_decimals - 4 * FEE_ICP,
             ),
-            Err(format!("LP token {}_{} already exists", symbol_0, symbol_1,)),
+            Err(format!(
+                "LP token {}_{} already exists",
+                *SYMBOL_0, *SYMBOL_1,
+            )),
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_liquidity_amounts_request(
-                amount_0_decimals - 2 * FEE_SNS,
-                token_0.to_string(),
-                token_1.to_string(),
+                amount_0_decimals - 4 * FEE_SNS,
+                TOKEN_0.to_string(),
+                TOKEN_1.to_string(),
             ),
             Ok(make_add_liquidity_amounts_reply(
-                amount_0_decimals - 2 * FEE_SNS,
-                amount_1_decimals - 2 * FEE_ICP - amount_1_remaining,
-                &symbol_0,
-                &symbol_1,
+                amount_0_decimals - 4 * FEE_SNS,
+                amount_1_decimals - 4 * FEE_ICP - amount_1_remaining,
+                &SYMBOL_0,
+                &SYMBOL_1,
             )),
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_liquidity_request(
-                amount_0_decimals - 2 * FEE_SNS,
-                amount_1_decimals - 2 * FEE_ICP - amount_1_remaining,
-                &token_0,
-                &token_1,
+                amount_0_decimals - 4 * FEE_SNS,
+                amount_1_decimals - 4 * FEE_ICP - amount_1_remaining,
+                &TOKEN_0,
+                &TOKEN_1,
             ),
             Ok(make_add_liquidity_reply(
-                amount_0_decimals - 2 * FEE_SNS,
-                amount_1_decimals - 2 * FEE_ICP - amount_1_remaining,
-                &symbol_0,
-                &symbol_1,
+                amount_0_decimals - 4 * FEE_SNS,
+                amount_1_decimals - 4 * FEE_ICP - amount_1_remaining,
+                &SYMBOL_0,
+                &SYMBOL_1,
             )),
         )
-        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(*SNS_LEDGER, make_balance_request(), Nat::from(0_u64))
         .add_call(
-            icp_ledger,
+            *ICP_LEDGER,
             make_balance_request(),
             Nat::from(amount_1_remaining),
         )
-        .add_call(sns_ledger, make_balance_request(), Nat::from(0_u64))
+        .add_call(*SNS_LEDGER, make_balance_request(), Nat::from(0_u64))
         .add_call(
-            icp_ledger,
+            *ICP_LEDGER,
             make_balance_request(),
             Nat::from(amount_1_remaining),
         );
@@ -256,7 +260,7 @@ async fn run_add_liquidity_test(
     // if there is any amount of token 1, we return it to the owner
     if amount_1_remaining != 0 {
         mock_agent = mock_agent.add_call(
-            icp_ledger,
+            *ICP_LEDGER,
             make_transfer_request(
                 Account {
                     owner: OWNER_ACCOUNT.owner,
@@ -267,7 +271,7 @@ async fn run_add_liquidity_test(
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
-                        index: 13,
+                        index: 15,
                         is_final: false,
                     },
                 },
@@ -312,8 +316,8 @@ async fn run_add_liquidity_test(
     let balances = Balances {
         timestamp_ns: 0,
         asset_to_balances: Some(btreemap! {
-            asset_0 => asset_0_balance,
-            asset_1 => asset_1_balance,
+            ASSET_0.clone() => asset_0_balance,
+            ASSET_1.clone() => asset_1_balance,
         }),
     };
 

@@ -10,7 +10,7 @@ use crate::{
 };
 use candid::Nat;
 use icrc_ledger_types::{
-    icrc1::account::Account,
+    icrc1::{account::Account, transfer::Memo},
     icrc2::{approve::ApproveArgs, transfer_from::TransferFromArgs},
 };
 use kongswap_adaptor::{agent::AbstractAgent, audit::OperationContext};
@@ -378,6 +378,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let fee_decimals = Nat::from(fee_decimals);
         let fee = Some(fee_decimals.clone());
 
+        let operation = context.next_operation();
+
         let request = TransferFromArgs {
             spender_subaccount: None,
             from: *owner_account,
@@ -388,17 +390,12 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             fee,
             amount,
             created_at_time: None,
-            memo: None,
+            memo: Some(Memo::from(Vec::<u8>::from(operation))),
         };
 
         // Fail early if at least one of the allowances fails.
-        self.emit_transaction(
-            context.next_operation(),
-            canister_id,
-            request,
-            human_readable,
-        )
-        .await?;
+        self.emit_transaction(operation, canister_id, request, human_readable)
+            .await?;
 
         Ok(received_amount_decimals)
     }
