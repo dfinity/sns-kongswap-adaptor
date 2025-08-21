@@ -189,8 +189,6 @@ async fn lifecycle_test() {
             (expected - observed).abs() <= expected.abs() * tolerance
         }
 
-        // @todo after clarifying the discrepancies between the calculated
-        // and expected amount with Kongswap team, decide what to do.
         let error_tolerance = 0.000001;
 
         assert!(is_within_tolerance(

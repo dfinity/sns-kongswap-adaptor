@@ -156,8 +156,6 @@ impl Request for TransferFromArgs {
         let ledger_canister_id = canister_id.to_string();
         let amount_decimals = self.amount.clone();
 
-        // @todo add sender and receiver
-        // @follow-up should we add a TransferFrom variant to the TransactionWitness?
         let witness = TransactionWitness::Ledger(vec![Transfer {
             ledger_canister_id,
             amount_decimals,

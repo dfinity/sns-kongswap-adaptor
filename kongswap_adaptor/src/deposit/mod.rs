@@ -65,7 +65,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let canister_id = asset.ledger_canister_id();
         let fee_decimals = asset.ledger_fee_decimals();
 
-        let approved_amount_decimals = amount_decimals - fee_decimals;
+        let approved_amount_decimals = amount_decimals.saturating_sub(fee_decimals);
         let amount = Nat::from(approved_amount_decimals);
 
         let fee_decimals = Nat::from(fee_decimals);
@@ -80,7 +80,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             // All approved tokens should be fully used up before the next deposit.
             amount,
             expected_allowance: Some(Nat::from(0u8)),
-            expires_at: Some(self.time_ns() + ONE_HOUR),
+            expires_at: Some(self.time_ns().saturating_add(ONE_HOUR)),
             memo: None,
             created_at_time: None,
             fee,
@@ -186,8 +186,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // We return the whole amount that was paid by the treasury manager:
         // the transferred amount to the external + the transfer fee paid for it.
         Ok((
-            amount_0 + allowance_0.asset.ledger_fee_decimals(),
-            amount_1 + allowance_1.asset.ledger_fee_decimals(),
+            amount_0.saturating_add(allowance_0.asset.ledger_fee_decimals()),
+            amount_1.saturating_add(allowance_1.asset.ledger_fee_decimals()),
         ))
     }
 
@@ -372,7 +372,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // one fee is deducted as fee for the issuance of the approval
         // the other one is the ledger transfer fee.
-        let received_amount_decimals = amount_decimals - 2 * fee_decimals;
+        let total_fee = fee_decimals.saturating_mul(2);
+        let received_amount_decimals = amount_decimals.saturating_sub(total_fee);
         let amount = Nat::from(received_amount_decimals);
 
         let fee_decimals = Nat::from(fee_decimals);
@@ -393,7 +394,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             memo: Some(Memo::from(Vec::<u8>::from(operation))),
         };
 
-        // Fail early if at least one of the allowances fails.
         self.emit_transaction(operation, canister_id, request, human_readable)
             .await?;
 
@@ -403,18 +403,17 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     async fn transfer_from_owner(
         &mut self,
         context: &mut OperationContext,
-        allowance_0: &ValidatedAllowance,
-        allowance_1: &ValidatedAllowance,
+        mut allowance_0: ValidatedAllowance,
+        mut allowance_1: ValidatedAllowance,
     ) -> Result<(ValidatedAllowance, ValidatedAllowance), Error> {
+        // Fail early if at least one of the allowances fails.
         let received_amount_decimals_0 =
-            self.transfer_from_owner_impl(context, allowance_0).await?;
+            self.transfer_from_owner_impl(context, &allowance_0).await?;
         let received_amount_decimals_1 =
-            self.transfer_from_owner_impl(context, allowance_1).await?;
+            self.transfer_from_owner_impl(context, &allowance_1).await?;
 
-        let mut allowance_0 = allowance_0.clone();
         allowance_0.amount_decimals = received_amount_decimals_0;
 
-        let mut allowance_1 = allowance_1.clone();
         allowance_1.amount_decimals = received_amount_decimals_1;
 
         Ok((allowance_0, allowance_1))
@@ -428,7 +427,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
     ) -> Result<ValidatedBalances, Vec<Error>> {
         // Transfer for the assets SNS has gave approval
         let (allowance_0, allowance_1) = self
-            .transfer_from_owner(context, &allowance_0, &allowance_1)
+            .transfer_from_owner(context, allowance_0, allowance_1)
             .await
             .map_err(|err| vec![err])?;
 
