@@ -189,12 +189,10 @@ async fn lifecycle_test() {
             (expected - observed).abs() <= expected.abs() * tolerance
         }
 
-        // @todo after clarifying the discrepancies between the calculated
-        // and expected amount with Kongswap team, decide what to do.
         let error_tolerance = 0.000001;
 
         assert!(is_within_tolerance(
-            11999246569_u64 as f64,
+            (11999246569_u64 - 6 * FEE_SNS) as f64,
             decode_nat_to_u64(
                 balances_0
                     .treasury_owner
@@ -206,8 +204,11 @@ async fn lifecycle_test() {
             .unwrap() as f64,
             error_tolerance
         ));
+
+        // As we now use ICRC2 for initialisations and deposits,
+        // for each one, we pay 2 extra fees: one approval + one transfer fee.
         assert!(is_within_tolerance(
-            12001107784_u64 as f64,
+            (12001107784_u64 - 6 * FEE_ICP) as f64,
             decode_nat_to_u64(
                 balances_1
                     .treasury_owner

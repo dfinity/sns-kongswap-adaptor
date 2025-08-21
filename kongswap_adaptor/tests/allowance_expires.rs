@@ -9,10 +9,10 @@ use std::time::Duration;
 use crate::common::{
     pocket_ic_agent::PocketIcAgent,
     utils::{
-        create_kong_adaptor, get_balance, get_kong_adaptor_wasm, install_icp_ledger,
-        install_kong_adaptor, install_kong_swap, install_sns_ledger, mint_tokens, E8, FEE,
-        NNS_GOVERNANCE_CANISTER_ID, SNS_GOVERNANCE_CANISTER_ID, TREASURY_ICP_ACCOUNT,
-        TREASURY_SNS_ACCOUNT,
+        approve_tokens, create_kong_adaptor, get_balance, get_kong_adaptor_wasm,
+        install_icp_ledger, install_kong_adaptor, install_kong_swap, install_sns_ledger,
+        mint_tokens, E8, FEE_ICP, FEE_SNS, NNS_GOVERNANCE_CANISTER_ID, SNS_GOVERNANCE_CANISTER_ID,
+        TREASURY_ICP_ACCOUNT, TREASURY_SNS_ACCOUNT,
     },
 };
 
@@ -44,10 +44,23 @@ async fn allowance_test() {
         agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
         sns_ledger_canister_id,
         Account {
+            owner: TREASURY_SNS_ACCOUNT.owner.clone(),
+            subaccount: TREASURY_SNS_ACCOUNT.subaccount.clone(),
+        },
+        initial_deposit_sns,
+    )
+    .await;
+
+    approve_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        sns_ledger_canister_id,
+        Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
         },
         initial_deposit_sns,
+        FEE_SNS,
+        TREASURY_SNS_ACCOUNT.subaccount.clone(),
     )
     .await;
 
@@ -55,10 +68,23 @@ async fn allowance_test() {
         agent.with_sender(*NNS_GOVERNANCE_CANISTER_ID),
         icp_ledger_canister_id,
         Account {
+            owner: TREASURY_ICP_ACCOUNT.owner.clone(),
+            subaccount: TREASURY_ICP_ACCOUNT.subaccount.clone(),
+        },
+        initial_deposit_icp,
+    )
+    .await;
+
+    approve_tokens(
+        agent.with_sender(*SNS_GOVERNANCE_CANISTER_ID),
+        icp_ledger_canister_id,
+        Account {
             owner: kong_adaptor_canister_id,
             subaccount: None,
         },
         initial_deposit_icp,
+        FEE_ICP,
+        TREASURY_ICP_ACCOUNT.subaccount.clone(),
     )
     .await;
 
@@ -75,10 +101,15 @@ async fn allowance_test() {
     )
     .await;
 
+    for _ in 0..10 {
+        agent.pic().tick().await;
+    }
+
     agent.pic().advance_time(Duration::from_secs(4000)).await;
+
     // We need between 50 and 100 ticks to get the initial deposit and the first batch of periodic
     // tasks to be processed.
-    for _ in 0..100 {
+    for _ in 0..90 {
         agent.pic().tick().await;
     }
     // Here, the initialisation must have failed due to expired allowances.
@@ -90,10 +121,10 @@ async fn allowance_test() {
 
     assert_eq!(
         governance_sns_balance,
-        Nat::from(initial_deposit_sns - 2 * FEE)
+        Nat::from(initial_deposit_sns - 4 * FEE_SNS)
     );
     assert_eq!(
         governance_icp_balance,
-        Nat::from(initial_deposit_icp - 2 * FEE)
+        Nat::from(initial_deposit_icp - 4 * FEE_ICP)
     );
 }

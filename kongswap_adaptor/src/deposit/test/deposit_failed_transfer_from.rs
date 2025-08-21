@@ -25,11 +25,11 @@ async fn test_failed_transfer_from_0() {
 
     let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
-        .treasury_owner(amount_0_decimals - 2 * FEE_SNS);
+        .treasury_owner(amount_0_decimals - 4 * FEE_SNS);
 
     let asset_1_balance = make_default_balance_book()
         .fee_collector(2 * FEE_ICP)
-        .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
+        .treasury_owner(amount_1_decimals - 4 * FEE_ICP);
 
     run_failed_transfer_from_test(
         true,
@@ -48,13 +48,13 @@ async fn test_failed_transfer_from_1() {
 
     let asset_0_balance = make_default_balance_book()
         .fee_collector(2 * FEE_SNS)
-        .treasury_owner(amount_0_decimals - 4 * FEE_SNS)
+        .treasury_owner(amount_0_decimals - 6 * FEE_SNS)
         .treasury_manager(2 * FEE_SNS)
         .suspense(2 * FEE_SNS);
 
     let asset_1_balance = make_default_balance_book()
         .fee_collector(2 * FEE_ICP)
-        .treasury_owner(amount_1_decimals - 2 * FEE_ICP);
+        .treasury_owner(amount_1_decimals - 4 * FEE_ICP);
 
     run_failed_transfer_from_test(
         false,
@@ -121,12 +121,12 @@ async fn run_failed_transfer_from_test(
     // of fees deducted.
     let (balance_0_after_add_pool, error_message) = if transfer_0_fails {
         (
-            amount_0_decimals - FEE_SNS,
+            amount_0_decimals - 3 * FEE_SNS,
             format!("Token_0 transfer failed"),
         )
     } else {
         (
-            amount_0_decimals - 3 * FEE_SNS,
+            amount_0_decimals - 5 * FEE_SNS,
             format!("Token_1 transfer failed"),
         )
     };
@@ -134,23 +134,69 @@ async fn run_failed_transfer_from_test(
     let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
         .add_call(
             *SNS_LEDGER,
-            make_approve_request(amount_0_decimals, FEE_SNS),
+            make_transfer_from_request(
+                Account {
+                    owner: OWNER_ACCOUNT.owner,
+                    subaccount: None,
+                },
+                Account {
+                    owner: *SELF_CANISTER_ID,
+                    subaccount: None,
+                },
+                FEE_SNS,
+                amount_0_decimals - 2 * FEE_SNS,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 0,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(0_u64)),
+        )
+        .add_call(
+            *ICP_LEDGER,
+            make_transfer_from_request(
+                Account {
+                    owner: OWNER_ACCOUNT.owner,
+                    subaccount: None,
+                },
+                Account {
+                    owner: *SELF_CANISTER_ID,
+                    subaccount: None,
+                },
+                FEE_ICP,
+                amount_1_decimals - 2 * FEE_ICP,
+                TreasuryManagerOperation {
+                    operation: sns_treasury_manager::Operation::Deposit,
+                    step: Step {
+                        index: 1,
+                        is_final: false,
+                    },
+                },
+            ),
+            Ok(Nat::from(1_u64)),
+        )
+        .add_call(
+            *SNS_LEDGER,
+            make_approve_request(amount_0_decimals - 2 * FEE_SNS, FEE_SNS),
             Ok(Nat::from(amount_0_decimals)),
         )
         .add_call(
             *ICP_LEDGER,
-            make_approve_request(amount_1_decimals, FEE_ICP),
+            make_approve_request(amount_1_decimals - 2 * FEE_ICP, FEE_ICP),
             Ok(Nat::from(amount_1_decimals)),
         )
         .add_call(
             *SNS_LEDGER,
             make_balance_request(),
-            Nat::from(amount_0_decimals - FEE_SNS),
+            Nat::from(amount_0_decimals - 3 * FEE_SNS),
         )
         .add_call(
             *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(amount_1_decimals - FEE_ICP),
+            Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
@@ -180,9 +226,9 @@ async fn run_failed_transfer_from_test(
             *KONG_BACKEND_CANISTER_ID,
             make_add_pool_request(
                 TOKEN_0.clone(),
-                amount_0_decimals - 2 * FEE_SNS,
+                amount_0_decimals - 4 * FEE_SNS,
                 TOKEN_1.clone(),
-                amount_1_decimals - 2 * FEE_ICP,
+                amount_1_decimals - 4 * FEE_ICP,
             ),
             Err(error_message.clone()),
         )
@@ -194,7 +240,7 @@ async fn run_failed_transfer_from_test(
         .add_call(
             *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(amount_1_decimals - FEE_ICP),
+            Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
             *SNS_LEDGER,
@@ -204,7 +250,7 @@ async fn run_failed_transfer_from_test(
         .add_call(
             *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(amount_1_decimals - FEE_ICP),
+            Nat::from(amount_1_decimals - 3 * FEE_ICP),
         )
         .add_call(
             *SNS_LEDGER,
@@ -218,7 +264,7 @@ async fn run_failed_transfer_from_test(
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
-                        index: 11,
+                        index: 13,
                         is_final: false,
                     },
                 },
@@ -233,11 +279,11 @@ async fn run_failed_transfer_from_test(
                     subaccount: None,
                 },
                 FEE_ICP,
-                amount_1_decimals - 1 * FEE_ICP,
+                amount_1_decimals - 3 * FEE_ICP,
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
-                        index: 12,
+                        index: 14,
                         is_final: false,
                     },
                 },
