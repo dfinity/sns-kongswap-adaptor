@@ -346,8 +346,13 @@ async fn init_async(allowance_0: Allowance, allowance_1: Allowance) {
         }
     };
 
-    let result: Result<(TreasuryManagerResult,), Vec<sns_treasury_manager::Error>> =
-        call_response.candid().unwrap();
+    let result: TreasuryManagerResult = match call_response.candid::<TreasuryManagerResult>() {
+        Ok(result) => result,
+        Err(err) => {
+            log_err(&format!("Cndid error {} decoding the response", err));
+            return;
+        }
+    };
 
     if let Err(err) = result {
         log_err(&format!("Initial deposit failed: {:?}", err));
