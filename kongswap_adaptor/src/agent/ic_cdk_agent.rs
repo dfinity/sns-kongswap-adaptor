@@ -1,5 +1,6 @@
 use super::{AbstractAgent, Request};
 use candid::Principal;
+use ic_cdk::call::{CallFailed, CandidDecodeFailed};
 use thiserror::Error;
 
 pub struct CdkAgent {}
@@ -12,12 +13,12 @@ impl CdkAgent {
 
 #[derive(Error, Debug)]
 pub enum CdkAgentError {
-    #[error("ic_cdk error code {0}: {1}")]
-    IcCdk(i32, String),
+    #[error(transparent)]
+    CallFailed(#[from] CallFailed),
     #[error("canister request could not be encoded: {0}")]
     CandidEncode(candid::Error),
-    #[error("canister did not respond with the expected response type: {0}")]
-    CandidDecode(candid::Error),
+    #[error(transparent)]
+    CandidDecode(#[from] CandidDecodeFailed),
 }
 
 impl AbstractAgent for CdkAgent {
@@ -28,17 +29,14 @@ impl AbstractAgent for CdkAgent {
         canister_id: impl Into<Principal> + Send,
         request: R,
     ) -> Result<R::Response, Self::Error> {
-        let args_raw = request.payload().map_err(CdkAgentError::CandidEncode)?;
+        let raw_args = request.payload().map_err(CdkAgentError::CandidEncode)?;
 
-        let response =
-            ic_cdk::api::call::call_raw(canister_id.into(), request.method(), args_raw, 0)
-                .await
-                .map_err(|(err_code, err_message)| {
-                    CdkAgentError::IcCdk(err_code as i32, err_message)
-                })?;
+        let call_response = ic_cdk::call::Call::bounded_wait(canister_id.into(), request.method())
+            .take_raw_args(raw_args)
+            .change_timeout(15 * 50) // A time out of 15 minutes for requests.
+            .await?;
 
-        let result =
-            candid::decode_one(response.as_slice()).map_err(CdkAgentError::CandidDecode)?;
+        let result = call_response.candid::<<R as Request>::Response>()?;
 
         Ok(result)
     }
