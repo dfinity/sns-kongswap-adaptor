@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use candid::{Nat, Principal};
 use ic_icrc1_ledger::{InitArgsBuilder, LedgerArgument};
@@ -85,6 +85,16 @@ lazy_static! {
         subaccount: Some(compute_treasury_subaccount_bytes(
             *SNS_GOVERNANCE_CANISTER_ID,
         )),
+    };
+
+    pub(crate) static ref WITHDRAW_ACCOUNT_0: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: Principal::from_text("loaof-ayaaa-aaaaq-aae2a-cai").unwrap() ,
+        subaccount: None
+    };
+
+    pub(crate) static ref WITHDRAW_ACCOUNT_1: sns_treasury_manager::Account = sns_treasury_manager::Account {
+        owner: Principal::from_text("izscx-raaaa-aaaaq-aaesq-cai").unwrap() ,
+        subaccount: None
     };
 }
 
@@ -641,10 +651,9 @@ pub(crate) async fn trade(
 pub(crate) async fn withdraw(
     agent: &mut PocketIcAgent,
     kong_adaptor_canister_id: Principal,
+    withdraw_accounts: Option<BTreeMap<Principal, sns_treasury_manager::Account>>,
 ) -> (BalanceBook, BalanceBook) {
-    let withdraw_request = WithdrawRequest {
-        withdraw_accounts: None,
-    };
+    let withdraw_request = WithdrawRequest { withdraw_accounts };
 
     let response = agent
         .with_sender(*SNS_GOVERNANCE_CANISTER_ID)
