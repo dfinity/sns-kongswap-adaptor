@@ -203,11 +203,11 @@ async fn test_deposit_success() {
     );
 
     let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
+        .fee_collector(3 * FEE_SNS)
         .external_custodian(amount_0_decimals - 4 * FEE_SNS);
 
     let asset_1_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_ICP)
+        .fee_collector(3 * FEE_ICP)
         .external_custodian(amount_1_decimals - 4 * FEE_ICP);
 
     let balances = Balances {

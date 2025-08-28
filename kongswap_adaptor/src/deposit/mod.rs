@@ -397,6 +397,16 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.emit_transaction(operation, canister_id, request, human_readable)
             .await?;
 
+        // The manager had received `allowance.amount_decimals` -
+        // `asset.ledger_fee_decimals()` approval.
+        self.add_manager_balance(
+            allowance.asset,
+            amount_decimals.saturating_sub(asset.ledger_fee_decimals()),
+        );
+        // When calling `icrc2_transferfrom`, the manager pays the
+        // transfer fee.
+        self.charge_fee(allowance.asset);
+
         Ok(received_amount_decimals)
     }
 
@@ -409,6 +419,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         // Fail early if at least one of the allowances fails.
         let received_amount_decimals_0 =
             self.transfer_from_owner_impl(context, &allowance_0).await?;
+
         let received_amount_decimals_1 =
             self.transfer_from_owner_impl(context, &allowance_1).await?;
 
@@ -430,11 +441,6 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             .transfer_from_owner(context, allowance_0, allowance_1)
             .await
             .map_err(|err| vec![err])?;
-
-        {
-            self.add_manager_balance(allowance_0.asset, allowance_0.amount_decimals);
-            self.add_manager_balance(allowance_1.asset, allowance_1.amount_decimals);
-        }
 
         let deposit_into_dex_result = self
             .deposit_into_dex(context, allowance_0, allowance_1)
