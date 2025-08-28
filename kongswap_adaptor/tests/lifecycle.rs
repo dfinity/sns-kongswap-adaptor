@@ -136,7 +136,7 @@ async fn lifecycle_test() {
 
     // VI: final phase: withdrawal
     {
-        let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
+        let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id, None).await;
         assert_eq!(
             balances_0.fee_collector.as_ref().unwrap().amount_decimals,
             Nat::from(8 * FEE_SNS)
