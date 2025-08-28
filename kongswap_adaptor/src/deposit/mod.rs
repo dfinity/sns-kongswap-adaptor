@@ -221,6 +221,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         let result = self.add_pool(context, allowance_0, allowance_1).await;
 
+        log_err(&format!("add_ppol: {:#?}", result));
+
         if let Err(Error {
             kind: ErrorKind::Backend {},
             message,
@@ -235,6 +237,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                     .await
                     .map_err(|err| vec![err])?;
             } else {
+                log_err("Adding pool really failed");
                 // It corresponds to a failed transfer from call.
                 let balances_after = self.get_ledger_balances(context).await?;
 
@@ -434,11 +437,21 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         {
             self.add_manager_balance(allowance_0.asset, allowance_0.amount_decimals);
             self.add_manager_balance(allowance_1.asset, allowance_1.amount_decimals);
+            log_err(&format!(
+                "manager balance_0 {}, manager balance_1 {}",
+                allowance_0.amount_decimals, allowance_1.amount_decimals,
+            ));
         }
 
         let deposit_into_dex_result = self
             .deposit_into_dex(context, allowance_0, allowance_1)
             .await;
+
+        log_err("After depositing with failure into DEX");
+        self.with_balances_mut(|balances| {
+            log_err(&format!("asset_0_balance: {:#?}", balances.asset_0_balance));
+            log_err(&format!("asset_1_balance: {:#?}", balances.asset_1_balance));
+        });
 
         let returned_amounts_result = self
             .return_remaining_assets_to_owner(

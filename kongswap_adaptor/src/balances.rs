@@ -43,7 +43,7 @@ impl Display for Party {
     }
 }
 
-#[derive(CandidType, Deserialize, Clone)]
+#[derive(CandidType, Deserialize, Clone, Debug)]
 pub(crate) struct ValidatedBalanceBook {
     pub treasury_owner: ValidatedBalance,
     pub treasury_manager: ValidatedBalance,
