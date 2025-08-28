@@ -31,14 +31,12 @@ impl AbstractAgent for CdkAgent {
     ) -> Result<R::Response, Self::Error> {
         let raw_args = request.payload().map_err(CdkAgentError::CandidEncode)?;
 
-        let call_response =
-            ic_cdk::call::Call::unbounded_wait(canister_id.into(), request.method())
-                .take_raw_args(raw_args)
-                .await?;
+        let call_response = ic_cdk::call::Call::bounded_wait(canister_id.into(), request.method())
+            .take_raw_args(raw_args)
+            .change_timeout(15 * 50) // A time out of 15 minutes for requests.
+            .await?;
 
-        let result = call_response
-            .candid::<<R as Request>::Response>()
-            .map_err(|err| CdkAgentError::CandidDecode(err.into()))?;
+        let result = call_response.candid::<<R as Request>::Response>()?;
 
         Ok(result)
     }
