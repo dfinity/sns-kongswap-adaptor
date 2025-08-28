@@ -33,7 +33,7 @@ impl AbstractAgent for CdkAgent {
 
         let call_response = ic_cdk::call::Call::bounded_wait(canister_id.into(), request.method())
             .take_raw_args(raw_args)
-            .change_timeout(15 * 50) // A time out of 15 minutes for requests.
+            .change_timeout(15 * 60) // A time out of 15 minutes for requests.
             .await?;
 
         let result = call_response.candid::<<R as Request>::Response>()?;
