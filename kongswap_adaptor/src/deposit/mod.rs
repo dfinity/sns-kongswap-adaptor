@@ -222,7 +222,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let result = self.add_pool(context, allowance_0, allowance_1).await;
 
         if let Err(Error {
-            kind: ErrorKind::Backend {},
+            kind: _,
             message,
             code,
         }) = result
@@ -254,7 +254,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
                 );
 
                 log_err(&format!(
-                    "Transferring one of the tokens from the manager to the DEX failed: {}",
+                    "Deposting into DEX failed with the message: {}",
                     message
                 ));
 
