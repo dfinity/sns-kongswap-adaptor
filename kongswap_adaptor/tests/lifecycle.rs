@@ -139,11 +139,11 @@ async fn lifecycle_test() {
         let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
         assert_eq!(
             balances_0.fee_collector.as_ref().unwrap().amount_decimals,
-            Nat::from(8 * FEE_SNS)
+            Nat::from(11 * FEE_SNS)
         );
         assert_eq!(
             balances_1.fee_collector.as_ref().unwrap().amount_decimals,
-            Nat::from(9 * FEE_ICP)
+            Nat::from(12 * FEE_ICP)
         );
 
         assert_eq!(

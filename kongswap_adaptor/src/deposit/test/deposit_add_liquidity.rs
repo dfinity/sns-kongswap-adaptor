@@ -23,10 +23,10 @@ async fn test_add_liquidity() {
     let amount_1_decimals = 400 * E8;
 
     let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
+        .fee_collector(3 * FEE_SNS)
         .external_custodian(amount_0_decimals - 4 * FEE_SNS);
     let asset_1_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_ICP)
+        .fee_collector(3 * FEE_ICP)
         .external_custodian(amount_1_decimals - 4 * FEE_ICP);
 
     run_add_liquidity_test(
@@ -46,10 +46,10 @@ async fn test_add_liquidity_unproportional() {
     let amount_1_remaining = 100 * E8;
 
     let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
+        .fee_collector(3 * FEE_SNS)
         .external_custodian(amount_0_decimals - 4 * FEE_SNS);
     let asset_1_balance = make_default_balance_book()
-        .fee_collector(3 * FEE_ICP)
+        .fee_collector(4 * FEE_ICP)
         .external_custodian(amount_1_decimals - 4 * FEE_ICP - amount_1_remaining)
         .treasury_owner(amount_1_remaining - FEE_ICP);
 
