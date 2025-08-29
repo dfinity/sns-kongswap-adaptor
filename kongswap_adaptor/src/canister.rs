@@ -87,16 +87,16 @@ fn canister_state() -> KongSwapAdaptor<CdkAgent> {
     KongSwapAdaptor::new(
         time_ns,
         CdkAgent::new(),
-        ic_cdk::id(),
+        ic_cdk::api::canister_self(),
         &BALANCES,
         &AUDIT_TRAIL,
     )
 }
 
 fn check_access() {
-    let caller = ic_cdk::api::caller();
+    let caller = ic_cdk::api::msg_caller();
 
-    if caller == ic_cdk::id() {
+    if caller == ic_cdk::api::canister_self() {
         return;
     }
 
@@ -110,14 +110,14 @@ fn check_access() {
 // Inspect the ingress messages in the pre-consensus phase and reject unauthorized access early.
 #[inspect_message]
 fn inspect_message() {
-    let method_name = ic_cdk::api::call::method_name();
+    let method_name = ic_cdk::api::msg_method_name();
 
     // Queries can be called by anyone, even if they are called as updates.
     if !["balances", "audit_trail"].contains(&method_name.as_str()) {
         check_access();
     }
 
-    ic_cdk::api::call::accept_message();
+    ic_cdk::api::accept_message();
 }
 
 declare_log_buffer!(name = LOG, capacity = 100);
@@ -130,7 +130,7 @@ fn log(msg: &str) {
     let msg = format!("[KongSwapAdaptor] {}", msg);
 
     if cfg!(target_arch = "wasm32") {
-        ic_cdk::print(&msg);
+        ic_cdk::api::debug_print(&msg);
     } else {
         println!("{}", msg);
     }
@@ -319,7 +319,7 @@ async fn run_periodic_tasks() {
 
 fn init_periodic_tasks() {
     let _new_timer_id = ic_cdk_timers::set_timer_interval(RUN_PERIODIC_TASKS_INTERVAL, || {
-        ic_cdk::spawn(run_periodic_tasks())
+        ic_cdk::futures::spawn(run_periodic_tasks())
     });
 }
 
@@ -330,21 +330,31 @@ async fn init_async(allowance_0: Allowance, allowance_1: Allowance) {
         allowances: vec![allowance_0, allowance_1],
     };
 
-    let result: Result<(TreasuryManagerResult,), _> =
-        ic_cdk::call(ic_cdk::id(), "deposit", (request,)).await;
+    let call_result = ic_cdk::call::Call::unbounded_wait(ic_cdk::api::canister_self(), "deposit")
+        .with_arg(request)
+        .await;
 
-    let result = match result {
+    let call_response = match call_result {
         Ok(result) => result,
-        Err((err_code, err_message)) => {
-            log_err(&format!(
-                "Self-call failed in async initializition. Error code {}: {:?}",
-                err_code as i32, err_message,
-            ));
+        Err(call_failed) => {
+            let error_message = format!(
+                "Self-call failed in async initialization due to: {}",
+                call_failed
+            );
+            log_err(&error_message);
             return;
         }
     };
 
-    if let Err(err) = result.0 {
+    let result: TreasuryManagerResult = match call_response.candid::<TreasuryManagerResult>() {
+        Ok(result) => result,
+        Err(err) => {
+            log_err(&format!("Candid error {} decoding the response", err));
+            return;
+        }
+    };
+
+    if let Err(err) = result {
         log_err(&format!("Initial deposit failed: {:?}", err));
         return;
     }
@@ -383,7 +393,7 @@ async fn canister_init(arg: TreasuryManagerArg) {
     let allowance_1 = Allowance::from(allowance_1);
 
     ic_cdk_timers::set_timer(Duration::ZERO, || {
-        ic_cdk::spawn(init_async(allowance_0, allowance_1))
+        ic_cdk::futures::spawn(init_async(allowance_0, allowance_1))
     });
 }
 

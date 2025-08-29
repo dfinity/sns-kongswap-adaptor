@@ -8,6 +8,9 @@ pub mod icrc_requests;
 pub mod mock_agent;
 
 use std::fmt::Debug;
+
+pub(crate) const EXTERNAL_CALL_TIMEOUT_SECONDS: u32 = 15 * 60; // A time out of 15 minutes for requests.
+
 pub trait Request: Send {
     fn method(&self) -> &'static str;
     fn payload(&self) -> Result<Vec<u8>, candid::Error>;
