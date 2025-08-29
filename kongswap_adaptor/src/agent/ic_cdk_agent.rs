@@ -1,3 +1,5 @@
+use crate::agent::EXTERNAL_CALL_TIMEOUT_SECONDS;
+
 use super::{AbstractAgent, Request};
 use candid::Principal;
 use ic_cdk::call::{CallFailed, CandidDecodeFailed};
@@ -33,7 +35,7 @@ impl AbstractAgent for CdkAgent {
 
         let call_response = ic_cdk::call::Call::bounded_wait(canister_id.into(), request.method())
             .take_raw_args(raw_args)
-            .change_timeout(15 * 60) // A time out of 15 minutes for requests.
+            .change_timeout(EXTERNAL_CALL_TIMEOUT_SECONDS)
             .await?;
 
         let result = call_response.candid::<<R as Request>::Response>()?;
