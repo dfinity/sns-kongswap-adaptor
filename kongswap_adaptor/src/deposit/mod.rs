@@ -403,7 +403,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
             allowance.asset,
             amount_decimals.saturating_sub(asset.ledger_fee_decimals()),
         );
-        // When calling `icrc2_transferfrom`, the manager pays the
+        // When calling `icrc2_transfer_from`, the manager pays the
         // transfer fee.
         self.charge_fee(allowance.asset);
 
