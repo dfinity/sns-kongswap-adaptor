@@ -349,7 +349,7 @@ async fn init_async(allowance_0: Allowance, allowance_1: Allowance) {
     let result: TreasuryManagerResult = match call_response.candid::<TreasuryManagerResult>() {
         Ok(result) => result,
         Err(err) => {
-            log_err(&format!("Cndid error {} decoding the response", err));
+            log_err(&format!("Candid error {} decoding the response", err));
             return;
         }
     };
