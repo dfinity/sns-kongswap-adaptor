@@ -9,7 +9,8 @@ use crate::common::{
     pocket_ic_agent::PocketIcAgent,
     utils::{
         create_kong_adaptor, get_kong_adaptor_wasm, install_icp_ledger, install_kong_swap,
-        install_sns_ledger, setup_kongswap_adaptor, E8, SNS_GOVERNANCE_CANISTER_ID,
+        install_sns_ledger, setup_kongswap_adaptor, E8, FEE_ICP, FEE_SNS,
+        SNS_GOVERNANCE_CANISTER_ID,
     },
 };
 
@@ -35,6 +36,9 @@ async fn e2e_test() {
     // Install canister under test.
     let kong_adaptor_canister_id = create_kong_adaptor(&agent.pic(), fiduciary_subnet_id).await;
 
+    let initial_deposit_sns = 100 * E8 + FEE_SNS;
+    let initial_deposit_icp = 100 * E8 + FEE_ICP;
+
     let original_wasm = get_kong_adaptor_wasm();
 
     setup_kongswap_adaptor(
@@ -43,8 +47,8 @@ async fn e2e_test() {
         icp_ledger_canister_id,
         kong_adaptor_canister_id,
         &original_wasm,
-        100 * E8,
-        100 * E8,
+        initial_deposit_sns,
+        initial_deposit_icp,
     )
     .await;
 

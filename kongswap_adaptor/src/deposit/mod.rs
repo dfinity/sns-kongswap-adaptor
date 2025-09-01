@@ -372,8 +372,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
 
         // one fee is deducted as fee for the issuance of the approval
         // the other one is the ledger transfer fee.
-        let total_fee = fee_decimals.saturating_mul(2);
-        let received_amount_decimals = amount_decimals.saturating_sub(total_fee);
+        let received_amount_decimals = amount_decimals.saturating_sub(fee_decimals);
         let amount = Nat::from(received_amount_decimals);
 
         let fee_decimals = Nat::from(fee_decimals);
@@ -397,12 +396,7 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         self.emit_transaction(operation, canister_id, request, human_readable)
             .await?;
 
-        // The manager had received `allowance.amount_decimals` -
-        // `asset.ledger_fee_decimals()` approval.
-        self.add_manager_balance(
-            allowance.asset,
-            amount_decimals.saturating_sub(asset.ledger_fee_decimals()),
-        );
+        self.add_manager_balance(allowance.asset, *amount_decimals);
         // When calling `icrc2_transfer_from`, the manager pays the
         // transfer fee.
         self.charge_fee(allowance.asset);

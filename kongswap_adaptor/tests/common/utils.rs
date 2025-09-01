@@ -233,7 +233,7 @@ pub(crate) async fn approve_tokens<Agent>(
     let request = ApproveArgs {
         from_subaccount,
         spender: beneficiary_account,
-        amount: Nat::from(amount_e8s - fee),
+        amount: Nat::from(amount_e8s),
         expected_allowance: None,
         expires_at: Some(u64::MAX),
         fee: Some(Nat::from(fee)),
@@ -411,7 +411,7 @@ pub(crate) async fn setup_kongswap_adaptor(
             owner: TREASURY_SNS_ACCOUNT.owner.clone(),
             subaccount: TREASURY_SNS_ACCOUNT.subaccount.clone(),
         },
-        initial_deposit_sns,
+        initial_deposit_sns + FEE_SNS,
     )
     .await;
 
@@ -435,7 +435,7 @@ pub(crate) async fn setup_kongswap_adaptor(
             owner: TREASURY_ICP_ACCOUNT.owner.clone(),
             subaccount: TREASURY_ICP_ACCOUNT.subaccount.clone(),
         },
-        initial_deposit_icp,
+        initial_deposit_icp + FEE_ICP,
     )
     .await;
 
@@ -487,7 +487,7 @@ pub(crate) async fn deposit(
             owner: TREASURY_SNS_ACCOUNT.owner.clone(),
             subaccount: TREASURY_SNS_ACCOUNT.subaccount.clone(),
         },
-        topup,
+        topup + FEE_SNS,
     )
     .await;
 
@@ -511,7 +511,7 @@ pub(crate) async fn deposit(
             owner: TREASURY_ICP_ACCOUNT.owner.clone(),
             subaccount: TREASURY_ICP_ACCOUNT.subaccount.clone(),
         },
-        topup,
+        topup + FEE_ICP,
     )
     .await;
 

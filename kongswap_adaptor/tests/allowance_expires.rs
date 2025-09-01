@@ -47,7 +47,7 @@ async fn allowance_test() {
             owner: TREASURY_SNS_ACCOUNT.owner.clone(),
             subaccount: TREASURY_SNS_ACCOUNT.subaccount.clone(),
         },
-        initial_deposit_sns,
+        initial_deposit_sns + FEE_SNS,
     )
     .await;
 
@@ -71,7 +71,7 @@ async fn allowance_test() {
             owner: TREASURY_ICP_ACCOUNT.owner.clone(),
             subaccount: TREASURY_ICP_ACCOUNT.subaccount.clone(),
         },
-        initial_deposit_icp,
+        initial_deposit_icp + FEE_ICP,
     )
     .await;
 
@@ -121,10 +121,10 @@ async fn allowance_test() {
 
     assert_eq!(
         governance_sns_balance,
-        Nat::from(initial_deposit_sns - 4 * FEE_SNS)
+        Nat::from(initial_deposit_sns - 3 * FEE_SNS)
     );
     assert_eq!(
         governance_icp_balance,
-        Nat::from(initial_deposit_icp - 4 * FEE_ICP)
+        Nat::from(initial_deposit_icp - 3 * FEE_ICP)
     );
 }

@@ -506,26 +506,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dfn_candid"
-version = "0.9.0"
-dependencies = [
- "candid",
- "dfn_core",
- "ic-base-types",
- "ic-http-types",
- "on_wire",
- "serde",
-]
-
-[[package]]
-name = "dfn_core"
-version = "0.9.0"
-dependencies = [
- "ic-base-types",
- "on_wire",
-]
-
-[[package]]
 name = "dfn_protobuf"
 version = "0.9.0"
 dependencies = [
@@ -1403,8 +1383,6 @@ dependencies = [
  "candid",
  "comparable",
  "crc32fast",
- "dfn_candid",
- "dfn_core",
  "dfn_protobuf",
  "hex",
  "ic-base-types",
