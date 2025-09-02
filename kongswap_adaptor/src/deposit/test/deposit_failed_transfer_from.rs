@@ -131,7 +131,7 @@ async fn run_failed_transfer_from_test(
         )
     };
 
-    let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
+    let mock_agent = MockAgent::new(*TREASURY_MANAGER_CANISTER_ID)
         .add_call(
             *SNS_LEDGER,
             make_transfer_from_request(
@@ -140,7 +140,7 @@ async fn run_failed_transfer_from_test(
                     subaccount: None,
                 },
                 Account {
-                    owner: *SELF_CANISTER_ID,
+                    owner: *TREASURY_MANAGER_CANISTER_ID,
                     subaccount: None,
                 },
                 FEE_SNS,
@@ -163,7 +163,7 @@ async fn run_failed_transfer_from_test(
                     subaccount: None,
                 },
                 Account {
-                    owner: *SELF_CANISTER_ID,
+                    owner: *TREASURY_MANAGER_CANISTER_ID,
                     subaccount: None,
                 },
                 FEE_ICP,
@@ -294,7 +294,7 @@ async fn run_failed_transfer_from_test(
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
-        *SELF_CANISTER_ID,
+        *TREASURY_MANAGER_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
     );

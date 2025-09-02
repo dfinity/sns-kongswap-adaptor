@@ -89,7 +89,7 @@ async fn test_withdraw_retry() {
     ];
 
     // Add deposit calls
-    let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
+    let mock_agent = MockAgent::new(*TREASURY_MANAGER_CANISTER_ID)
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_lp_balance_request(),
@@ -124,7 +124,7 @@ async fn test_withdraw_retry() {
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             ClaimsArgs {
-                principal_id: SELF_CANISTER_ID.to_string(),
+                principal_id: TREASURY_MANAGER_CANISTER_ID.to_string(),
             },
             Ok(vec![make_claims_reply(&symbol_0, &symbol_1)]),
         )
@@ -173,7 +173,7 @@ async fn test_withdraw_retry() {
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
-        *SELF_CANISTER_ID,
+        *TREASURY_MANAGER_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
     );
