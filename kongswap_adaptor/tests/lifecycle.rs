@@ -39,11 +39,11 @@ async fn lifecycle_test() {
 
     // Phase I: setup the canister
     // When we freshly deploy the pool, the desired amounts of both
-    // tokens are moved to the pool. Therefore, we expect
+    // tokens are moved to the pool (minus the fees). Therefore, we expect
     // SNS:
-    //      reserve_sns = 100 * E8 - 2 * FEE_SNS
+    //      reserve_sns = 100 * E8 - 3 * FEE_SNS
     // ICP:
-    //      reserve_icp = 100 * E8 - 2 * FEE_ICP
+    //      reserve_icp = 100 * E8 - 3 * FEE_ICP
     setup_kongswap_adaptor(
         &mut agent,
         sns_ledger_canister_id,
@@ -59,9 +59,9 @@ async fn lifecycle_test() {
     // As the second deposit is proportional to the existing reserves
     // of the pool, it gets thoroughly transferred to the pool
     // SNS:
-    //      reserve_sns += 10 - 2 * FEE_SNS
+    //      reserve_sns += 10 - 3 * FEE_SNS
     // ICP:
-    //      reserve_icp += 10 - 2 * FEE_ICP
+    //      reserve_icp += 10 - 3 * FEE_ICP
     deposit(
         &mut agent,
         sns_ledger_canister_id,
@@ -137,13 +137,19 @@ async fn lifecycle_test() {
     // VI: final phase: withdrawal
     {
         let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
+
+        // Expect to have paid 11 fees (3 deposits, each 3 fees, one DEX withdrawal,
+        // and one return to treasury account transaction fee).
         assert_eq!(
             balances_0.fee_collector.as_ref().unwrap().amount_decimals,
-            Nat::from(8 * FEE_SNS)
+            Nat::from(11 * FEE_SNS)
         );
+
+        // There was excess ICP that should have been returned to the treasury account,
+        // which is why there is an additional fee for the ICP token compared to the SNS token.
         assert_eq!(
             balances_1.fee_collector.as_ref().unwrap().amount_decimals,
-            Nat::from(9 * FEE_ICP)
+            Nat::from(12 * FEE_ICP)
         );
 
         assert_eq!(
@@ -189,10 +195,10 @@ async fn lifecycle_test() {
             (expected - observed).abs() <= expected.abs() * tolerance
         }
 
-        let error_tolerance = 0.000001;
+        let error_tolerance = 0.00001;
 
         assert!(is_within_tolerance(
-            (11999246569_u64 - 6 * FEE_SNS) as f64,
+            (11999246569_u64 - 9 * FEE_SNS) as f64,
             decode_nat_to_u64(
                 balances_0
                     .treasury_owner
@@ -205,10 +211,8 @@ async fn lifecycle_test() {
             error_tolerance
         ));
 
-        // As we now use ICRC2 for initialisations and deposits,
-        // for each one, we pay 2 extra fees: one approval + one transfer fee.
         assert!(is_within_tolerance(
-            (12001107784_u64 - 6 * FEE_ICP) as f64,
+            (12001107784_u64 - 9 * FEE_ICP) as f64,
             decode_nat_to_u64(
                 balances_1
                     .treasury_owner

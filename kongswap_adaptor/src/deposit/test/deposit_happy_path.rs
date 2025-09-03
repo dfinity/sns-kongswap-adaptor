@@ -63,7 +63,7 @@ async fn test_deposit_success() {
         },
     ];
 
-    let mock_agent = MockAgent::new(*SELF_CANISTER_ID)
+    let mock_agent = MockAgent::new(*TREASURY_MANAGER_CANISTER_ID)
         .add_call(
             *SNS_LEDGER,
             make_transfer_from_request(
@@ -72,11 +72,11 @@ async fn test_deposit_success() {
                     subaccount: None,
                 },
                 Account {
-                    owner: *SELF_CANISTER_ID,
+                    owner: *TREASURY_MANAGER_CANISTER_ID,
                     subaccount: None,
                 },
                 FEE_SNS,
-                amount_0_decimals - 2 * FEE_SNS,
+                amount_0_decimals - FEE_SNS,
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
@@ -95,11 +95,11 @@ async fn test_deposit_success() {
                     subaccount: None,
                 },
                 Account {
-                    owner: *SELF_CANISTER_ID,
+                    owner: *TREASURY_MANAGER_CANISTER_ID,
                     subaccount: None,
                 },
                 FEE_ICP,
-                amount_1_decimals - 2 * FEE_ICP,
+                amount_1_decimals - FEE_ICP,
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
@@ -112,23 +112,23 @@ async fn test_deposit_success() {
         )
         .add_call(
             *SNS_LEDGER,
-            make_approve_request(amount_0_decimals - 2 * FEE_SNS, FEE_SNS),
+            make_approve_request(amount_0_decimals - FEE_SNS, FEE_SNS),
             Ok(Nat::from(amount_0_decimals)),
         )
         .add_call(
             *ICP_LEDGER,
-            make_approve_request(amount_1_decimals - 2 * FEE_ICP, FEE_ICP),
+            make_approve_request(amount_1_decimals - FEE_ICP, FEE_ICP),
             Ok(Nat::from(amount_1_decimals)),
         )
         .add_call(
             *SNS_LEDGER,
             make_balance_request(),
-            Nat::from(amount_0_decimals - 3 * FEE_SNS),
+            Nat::from(amount_0_decimals - 2 * FEE_SNS),
         )
         .add_call(
             *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(amount_1_decimals - 3 * FEE_ICP),
+            Nat::from(amount_1_decimals - 2 * FEE_ICP),
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
@@ -158,9 +158,9 @@ async fn test_deposit_success() {
             *KONG_BACKEND_CANISTER_ID,
             make_add_pool_request(
                 TOKEN_0.clone(),
-                amount_0_decimals - 4 * FEE_SNS,
+                amount_0_decimals - 3 * FEE_SNS,
                 TOKEN_1.clone(),
-                amount_1_decimals - 4 * FEE_ICP,
+                amount_1_decimals - 3 * FEE_ICP,
             ),
             Ok(make_add_pool_reply(&SYMBOL_0, &SYMBOL_1)),
         )
@@ -172,7 +172,7 @@ async fn test_deposit_success() {
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
-        *SELF_CANISTER_ID,
+        *TREASURY_MANAGER_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
     );
@@ -203,12 +203,12 @@ async fn test_deposit_success() {
     );
 
     let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 4 * FEE_SNS);
+        .fee_collector(3 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 3 * FEE_SNS);
 
     let asset_1_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 4 * FEE_ICP);
+        .fee_collector(3 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 3 * FEE_ICP);
 
     let balances = Balances {
         timestamp_ns: 0,
