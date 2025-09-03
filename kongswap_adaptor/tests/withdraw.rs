@@ -100,20 +100,23 @@ async fn withdraw_test() {
 
         // Fees:
         // I. deposit
-        //      1. approval fee from the SNS
-        //      2. transfer fee from the SNS to the adaptor
-        //      3. approval fee from the adaptor
-        //      4. transfer fee from the adaptor to the DEX
+        //      1. transfer fee from the SNS to the adaptor
+        //      2. approval fee from the adaptor
+        //      3. transfer fee from the adaptor to the DEX
         // II. withdraw
-        //      5. transfer fee from the DEX to the adaptor
-        //      6. transfer fee from the adaptor to the withdraw account
+        //      4. transfer fee from the DEX to the adaptor
+        //      5. transfer fee from the adaptor to the withdraw account
+
+        // Approval fee from the SNS is not counted, as when setting up the approval
+        // we have given approval for the initial_deposit_sns + FEE_SNS and
+        // initial_deposit_icp + FEE_ICP
         assert_eq!(
             withdraw_account_0_balance,
-            Nat::from(initial_deposit_sns - 6 * FEE_SNS)
+            Nat::from(initial_deposit_sns - 5 * FEE_SNS)
         );
         assert_eq!(
             withdraw_account_1_balance,
-            Nat::from(initial_deposit_icp - 6 * FEE_ICP)
+            Nat::from(initial_deposit_icp - 5 * FEE_ICP)
         );
     }
 }
