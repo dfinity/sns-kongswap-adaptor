@@ -370,8 +370,8 @@ impl<A: AbstractAgent> KongSwapAdaptor<A> {
         let canister_id = asset.ledger_canister_id();
         let fee_decimals = asset.ledger_fee_decimals();
 
-        // one fee is deducted as fee for the issuance of the approval
-        // the other one is the ledger transfer fee.
+        // Upon calling `icrc2_transfer_from` the ledger transfer fee
+        // is deducted from the value approved by the SNS.
         let received_amount_decimals = amount_decimals.saturating_sub(fee_decimals);
         let amount = Nat::from(received_amount_decimals);
 

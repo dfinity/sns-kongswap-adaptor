@@ -39,7 +39,7 @@ async fn lifecycle_test() {
 
     // Phase I: setup the canister
     // When we freshly deploy the pool, the desired amounts of both
-    // tokens are moved to the pool. Therefore, we expect
+    // tokens are moved to the pool (minus the fees). Therefore, we expect
     // SNS:
     //      reserve_sns = 100 * E8 - 3 * FEE_SNS
     // ICP:
@@ -137,10 +137,16 @@ async fn lifecycle_test() {
     // VI: final phase: withdrawal
     {
         let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
+
+        // Expect to have paid 11 fees (3 deposits, each 3 fees, one DEX withdrawal,
+        // and one return to treasury account transaction fee).
         assert_eq!(
             balances_0.fee_collector.as_ref().unwrap().amount_decimals,
             Nat::from(11 * FEE_SNS)
         );
+
+        // There was excess ICP that should have been returned to the treasury account,
+        // which is why there is an additional fee for the ICP token compared to the SNS token.
         assert_eq!(
             balances_1.fee_collector.as_ref().unwrap().amount_decimals,
             Nat::from(12 * FEE_ICP)
