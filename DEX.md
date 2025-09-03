@@ -47,7 +47,7 @@ This formula is know as *Constant Product Invariant*. When trading liquidty rema
 $reserve_0 * reserve_1 = (reserve_0 + amount_0) * (reserve_1 - amount_1)$
 
 $amount_1$ is the amount of $T_1$ that is going to be removed from the pool. Before sending
-it to the user, we have to pay some fees: mainly a platform fee that goes to the owners of the
+it to the user, some fees are deducted: mainly a platform fee that goes to the owners of the
 DEX and an LP-fee that is going to be accumulated for the liquidity porivders proportional to the 
 amount of liquidity they have added to the system.
 
