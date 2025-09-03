@@ -2,7 +2,7 @@
 
 A Decentralized EXchange (DEX) is a smart contract that enables users to trade tokens without relying on a centralized intermediary. Instead, trades are executed directly on-chain through liquidity pools.
 
-# Liquidity Pool:
+# Liquidity Pool (LP)
 
 Each DEX consists of one or more liquidity pools. A pool typically holds two tokens (say, $T_0$ and $T_1$). 
 In an ideal world, there would be a pool for every possible token pair.
