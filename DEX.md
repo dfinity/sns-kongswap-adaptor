@@ -27,11 +27,11 @@ $MR = \frac{reserve_0}{reserve_1}$
 
 Equivalently, it is the price of $T_1$ quoted in $T_0$. Intuitively, the higher the relative abundance of $T_0$ compared to $T_1$, the cheaper $T_1$ becomes in terms of $T_0$.
 
-When an LP deposits $amount_0$ and $amount_1$ to the pool (deposit ratio $DR = \frac{amount_0}{amount_1}$), pool takes from $amount_0$ and $amount_1$ according to the market ratio:
+When an LP deposits $amount_0$ and $amount_1$ to the pool (deposit ratio $DR = \frac{amount_0}{amount_1}$), the pool takes the following amounts from $T_0$ and $T_1$ respectively:
 
-1. if $DR == MR$ => pool takes $amount_0$ and $amount_1$
-2. if $DR >  MR$ => pool takes $amount_1 \times MR$ from $amount_0$ and $amount_0$
-3. if $DR <  MR$ => pool takes $amount_0$ and $amount_0 \times MR$ from $amount_1$
+1. if $DR == MR$ => ($amount_0$, $amount_1$)
+2. if $DR >  MR$ => ($amount_1 \times MR$, $amount_1$)
+3. if $DR <  MR$ => ($amount_0$, $amount_0 \times MR$)
 
 This ensures that liquidity is always added proportional to the current reserves' balances.
 If $DR \ne MR$, the excess amount is returned to the LP.
@@ -40,7 +40,7 @@ If $DR \ne MR$, the excess amount is returned to the LP.
 
 Assume a trader wants to swap $T_0$ for $T_1$. To trade, they send $amount_0$ of $T_0$.
 
-In the uniform liquidity model (used in Uniswap V2), liquidity is defined as:
+In the uniform liquidity model (popularized by Uniswap V2), liquidity is defined as:
 
 $L^2 = reserve_0 * reserve_1$
 
@@ -66,23 +66,28 @@ the protocol to compound their rewards.
 
 # Pitfalls and Fallacies
 
-In this section, we will highlight common pitfalls and misconceptions that can be confusing for users.
+In this section, we will highlight common pitfalls and misconceptions.
 
 ## Pool Price $\ne$ Actual Price
 
-The pool exchange price (which is called *Local Price*) is solely defined by the ratio of assets in the pool. As users can trade their tokens, the ratio of the tokens diverges from the actual price.
+The pool exchange price (which is called *Local Price*) is solely defined by the ratio of assets in the pool. As users can trade their tokens, the ratio of the tokens diverges from the actual price, which is determined by the broader market of Centralized Exchanges, other DEXes, OTC desks, and oracles.
 
 ## Impermanent Loss
 
-When LPs deposit assets to a pool, the exchange price can change according to the point $MR$. As mentioned above, the local price can be different from the actual price. Hence, one asset, e.g., $T_0$, is significantly more appreciated than the other one. In this case, liquidity providers end up selling their assets at an undervalued price relative to the broader market. 
+When LPs deposit assets to a pool, the exchange price can change according to the $MR$. As mentioned in [Pool Price $\ne$ Actual Price](#pool-price-actual-price), the local price can be different from the actual price. Hence, if one asset, e.g., $T_0$, is significantly more appreciated than the other one. In this case, liquidity providers end up selling their assets at an undervalued price relative to the broader market. 
 
 ## Slippage
 
-Traders don’t swap at a single fixed price, but along the curve defined by the constant product rule. Larger trades move the reserves more, so the average execution price is worse than the quoted start price.
+Traders don’t swap at a single fixed price, but along the curve defined by the *Constant Product Invariant*. Larger trades move the reserves more, so the average execution price is worse than the quoted start price.
+
+Some DEXes implement a mechanism called Slippage Protection. When users trade or deposit, they can specify a maximum tolerable slippage (the maximum allowed deviation between the expected and actual execution price). If the trade would exceed this limit, the DEX cancels the execution and returns the tokens to the user.
 
 ## Front-running
 
-When used as an extension to SNS, each initialization, deposit, or withdraw proposal goes through a public voting process. It means that an attacker can guess the outcome of a voting when in its last stage. As explained before, they can then front-run the execution of the proposal by submitting a trade transaction and move the market ratio away from the ratio expected in the proposal.
+When used as an extension to SNS, each initialization, deposit, or withdraw proposal goes through a public voting process. It means that attackers can guess the outcome of a voting when in its last stage. Then, they can make their transaction before the execution of the proposal (hence called front-running) and move the market ratio away from the ratio expected in the proposal. In this case, when the proposal gets executed, it observes a market ratio different than the expected market ratio. It means that the pool can be in an unhealthy state ($MR \gg 1$ or $MR \ll 1$) and when
+
+1. depositing, the SNS treasury funds will also end up in this unhealthy state
+2. withdrawing, the SNS (which has an LP role) will have less money.
 
 ## Liquidity Provider Risks
 
@@ -90,4 +95,4 @@ Although LPs are entitled to receive LP-fees, LP fees do not always offset imper
 
 ## Transaction Fees
 
-Every deposit, withdrawal, or trade involves blockchain transaction fees. These costs reduce the effective amount received.
+Every deposit, withdrawal, or trade involves ledger fees. These costs reduce the effective amount received.
