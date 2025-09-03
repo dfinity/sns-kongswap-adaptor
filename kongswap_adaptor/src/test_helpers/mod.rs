@@ -32,7 +32,7 @@ pub(crate) const SUCCESS_STATUS: &'static str = "Success";
 pub(crate) const FAILURE_STATUS: &'static str = "Failed";
 
 lazy_static! {
-    pub(crate) static ref SELF_CANISTER_ID: Principal =
+    pub(crate) static ref TREASURY_MANAGER_CANISTER_ID: Principal =
         Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
     pub(crate) static ref SNS_LEDGER: Principal = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
     pub(crate) static ref ICP_LEDGER: Principal = Principal::from_text("ryjl3-tyaaa-aaaaa-aaaba-cai").unwrap();
@@ -41,11 +41,11 @@ lazy_static! {
         subaccount: None,
     };
     pub(crate) static ref MANAGER_ACCOUNT: sns_treasury_manager::Account = sns_treasury_manager::Account {
-        owner: *SELF_CANISTER_ID,
+        owner: *TREASURY_MANAGER_CANISTER_ID,
         subaccount: None,
     };
 
-    pub(crate) static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *SELF_CANISTER_ID);
+    pub(crate) static ref MANAGER_NAME: String = format!("KongSwapAdaptor({})", *TREASURY_MANAGER_CANISTER_ID);
     pub(crate) static ref TOKEN_0: String = format!("IC.{}", *SNS_LEDGER);
     pub(crate) static ref TOKEN_1: String = format!("IC.{}", *ICP_LEDGER);
     pub(crate) static ref SYMBOL_0: String = "DAO".to_string();
@@ -85,7 +85,7 @@ pub(crate) fn make_approve_request(amount: u64, fee: u64) -> ApproveArgs {
 
 pub(crate) fn make_balance_request() -> Account {
     Account {
-        owner: *SELF_CANISTER_ID,
+        owner: *TREASURY_MANAGER_CANISTER_ID,
         subaccount: None,
     }
 }
@@ -173,7 +173,7 @@ pub(crate) fn make_transfer_request(
 
 pub(crate) fn make_lp_balance_request() -> UserBalancesArgs {
     UserBalancesArgs {
-        principal_id: SELF_CANISTER_ID.to_string(),
+        principal_id: TREASURY_MANAGER_CANISTER_ID.to_string(),
     }
 }
 

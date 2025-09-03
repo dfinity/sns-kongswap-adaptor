@@ -387,10 +387,10 @@ mod test {
     }
 
     lazy_static! {
-        static ref SELF_CANISTER_ID: Principal =
+        static ref TREASURY_MANAGER_CANISTER_ID: Principal =
             Principal::from_text("jexlm-gaaaa-aaaar-qalmq-cai").unwrap();
         static ref TEST_ACCOUNT: Account = Account {
-            owner: *SELF_CANISTER_ID,
+            owner: *TREASURY_MANAGER_CANISTER_ID,
             subaccount: None,
         };
         static ref TEST_PRINCIPAL: Principal = Principal::from_text("2vxsx-fae").unwrap();
@@ -411,7 +411,7 @@ mod test {
     }
 
     fn create_test_adaptor() -> KongSwapAdaptor<MockAgent> {
-        let mock_agent = MockAgent::new(*SELF_CANISTER_ID);
+        let mock_agent = MockAgent::new(*TREASURY_MANAGER_CANISTER_ID);
         let canister_id = Principal::from_text("rdmx6-jaaaa-aaaaa-aaadq-cai").unwrap();
 
         KongSwapAdaptor::new(

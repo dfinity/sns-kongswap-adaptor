@@ -23,11 +23,11 @@ async fn test_add_liquidity() {
     let amount_1_decimals = 400 * E8;
 
     let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 4 * FEE_SNS);
+        .fee_collector(3 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 3 * FEE_SNS);
     let asset_1_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 4 * FEE_ICP);
+        .fee_collector(3 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 3 * FEE_ICP);
 
     run_add_liquidity_test(
         amount_0_decimals,
@@ -46,11 +46,11 @@ async fn test_add_liquidity_unproportional() {
     let amount_1_remaining = 100 * E8;
 
     let asset_0_balance = make_default_balance_book()
-        .fee_collector(2 * FEE_SNS)
-        .external_custodian(amount_0_decimals - 4 * FEE_SNS);
+        .fee_collector(3 * FEE_SNS)
+        .external_custodian(amount_0_decimals - 3 * FEE_SNS);
     let asset_1_balance = make_default_balance_book()
-        .fee_collector(3 * FEE_ICP)
-        .external_custodian(amount_1_decimals - 4 * FEE_ICP - amount_1_remaining)
+        .fee_collector(4 * FEE_ICP)
+        .external_custodian(amount_1_decimals - 3 * FEE_ICP - amount_1_remaining)
         .treasury_owner(amount_1_remaining - FEE_ICP);
 
     run_add_liquidity_test(
@@ -111,7 +111,7 @@ async fn run_add_liquidity_test(
         },
     ];
 
-    let mut mock_agent = MockAgent::new(*SELF_CANISTER_ID)
+    let mut mock_agent = MockAgent::new(*TREASURY_MANAGER_CANISTER_ID)
         .add_call(
             *SNS_LEDGER,
             make_transfer_from_request(
@@ -120,11 +120,11 @@ async fn run_add_liquidity_test(
                     subaccount: None,
                 },
                 Account {
-                    owner: *SELF_CANISTER_ID,
+                    owner: *TREASURY_MANAGER_CANISTER_ID,
                     subaccount: None,
                 },
                 FEE_SNS,
-                amount_0_decimals - 2 * FEE_SNS,
+                amount_0_decimals - FEE_SNS,
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
@@ -143,11 +143,11 @@ async fn run_add_liquidity_test(
                     subaccount: None,
                 },
                 Account {
-                    owner: *SELF_CANISTER_ID,
+                    owner: *TREASURY_MANAGER_CANISTER_ID,
                     subaccount: None,
                 },
                 FEE_ICP,
-                amount_1_decimals - 2 * FEE_ICP,
+                amount_1_decimals - FEE_ICP,
                 TreasuryManagerOperation {
                     operation: sns_treasury_manager::Operation::Deposit,
                     step: Step {
@@ -160,23 +160,23 @@ async fn run_add_liquidity_test(
         )
         .add_call(
             *SNS_LEDGER,
-            make_approve_request(amount_0_decimals - 2 * FEE_SNS, FEE_SNS),
+            make_approve_request(amount_0_decimals - FEE_SNS, FEE_SNS),
             Ok(Nat::from(amount_0_decimals)),
         )
         .add_call(
             *ICP_LEDGER,
-            make_approve_request(amount_1_decimals - 2 * FEE_ICP, FEE_ICP),
+            make_approve_request(amount_1_decimals - FEE_ICP, FEE_ICP),
             Ok(Nat::from(amount_1_decimals)),
         )
         .add_call(
             *SNS_LEDGER,
             make_balance_request(),
-            Nat::from(amount_0_decimals - 3 * FEE_SNS),
+            Nat::from(amount_0_decimals - 2 * FEE_SNS),
         )
         .add_call(
             *ICP_LEDGER,
             make_balance_request(),
-            Nat::from(amount_1_decimals - 3 * FEE_ICP),
+            Nat::from(amount_1_decimals - 2 * FEE_ICP),
         )
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
@@ -206,9 +206,9 @@ async fn run_add_liquidity_test(
             *KONG_BACKEND_CANISTER_ID,
             make_add_pool_request(
                 TOKEN_0.clone(),
-                amount_0_decimals - 4 * FEE_SNS,
+                amount_0_decimals - 3 * FEE_SNS,
                 TOKEN_1.clone(),
-                amount_1_decimals - 4 * FEE_ICP,
+                amount_1_decimals - 3 * FEE_ICP,
             ),
             Err(format!(
                 "LP token {}_{} already exists",
@@ -218,13 +218,13 @@ async fn run_add_liquidity_test(
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_liquidity_amounts_request(
-                amount_0_decimals - 4 * FEE_SNS,
+                amount_0_decimals - 3 * FEE_SNS,
                 TOKEN_0.to_string(),
                 TOKEN_1.to_string(),
             ),
             Ok(make_add_liquidity_amounts_reply(
-                amount_0_decimals - 4 * FEE_SNS,
-                amount_1_decimals - 4 * FEE_ICP - amount_1_remaining,
+                amount_0_decimals - 3 * FEE_SNS,
+                amount_1_decimals - 3 * FEE_ICP - amount_1_remaining,
                 &SYMBOL_0,
                 &SYMBOL_1,
             )),
@@ -232,14 +232,14 @@ async fn run_add_liquidity_test(
         .add_call(
             *KONG_BACKEND_CANISTER_ID,
             make_add_liquidity_request(
-                amount_0_decimals - 4 * FEE_SNS,
-                amount_1_decimals - 4 * FEE_ICP - amount_1_remaining,
+                amount_0_decimals - 3 * FEE_SNS,
+                amount_1_decimals - 3 * FEE_ICP - amount_1_remaining,
                 &TOKEN_0,
                 &TOKEN_1,
             ),
             Ok(make_add_liquidity_reply(
-                amount_0_decimals - 4 * FEE_SNS,
-                amount_1_decimals - 4 * FEE_ICP - amount_1_remaining,
+                amount_0_decimals - 3 * FEE_SNS,
+                amount_1_decimals - 3 * FEE_ICP - amount_1_remaining,
                 &SYMBOL_0,
                 &SYMBOL_1,
             )),
@@ -283,7 +283,7 @@ async fn run_add_liquidity_test(
     let mut kong_adaptor = KongSwapAdaptor::new(
         || 0, // Mock time function
         mock_agent,
-        *SELF_CANISTER_ID,
+        *TREASURY_MANAGER_CANISTER_ID,
         &BALANCES,
         &AUDIT_TRAIL,
     );
