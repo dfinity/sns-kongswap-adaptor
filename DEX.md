@@ -42,7 +42,7 @@ In the uniform liquidity model (used in Uniswap V2), liquidity is defined as:
 
 $L^2 = reserve_0 * reserve_1$
 
-This formula is know as *Constant Product Invariant*. When trading liquidty remains unchanged:
+This formula is know as *Constant Product Invariant*. When trading, the liquidity remains unchanged:
 
 $reserve_0 * reserve_1 = (reserve_0 + amount_0) * (reserve_1 - amount_1)$
 
