@@ -1,11 +1,11 @@
 # What is a DEX?
 
 A Decentralized EXchange (DEX) is a smart contract that enables users to trade tokens without relying on a centralized intermediary. Instead, trades are executed directly on-chain through liquidity pools.
+Users willing to trade can sell their tokens of interest in return for another token.
 
-# Liquidity Pool (LP)
+# Liquidity Pool
 
 Each DEX consists of one or more liquidity pools. A pool typically holds two tokens (say, $T_0$ and $T_1$). 
-In an ideal world, there would be a pool for every possible token pair.
 Role of the users interacting with a liquidity pool can be:
 
 1. Liquidity Providers (LPs): Users who deposit tokens into pools are called liquidity providers.
@@ -19,11 +19,13 @@ When a trade occurs, the trader pays a fee. This fee usually consists of:
 
 Some platforms allow LPs to claim and reinvest their fees, effectively compounding their rewards.
 
-# Market Ratio:
+# Market Ratio
 
 A liquidity pool maintains a market ratio (MR) between its two tokens:
 
 $MR = \frac{reserve_0}{reserve_1}$
+
+Equivalently, it is the price of $T_1$ quoted in $T_0$. Intuitively, the higher the relative abundance of $T_0$ compared to $T_1$, the cheaper $T_1$ becomes in terms of $T_0$.
 
 When an LP deposits $amount_0$ and $amount_1$ to the pool (deposit ratio $DR = \frac{amount_0}{amount_1}$), pool takes from $amount_0$ and $amount_1$ according to the market ratio:
 
@@ -32,26 +34,26 @@ When an LP deposits $amount_0$ and $amount_1$ to the pool (deposit ratio $DR = \
 3. if $DR <  MR$ => pool takes $amount_0$ and $amount_0 \times MR$ from $amount_1$
 
 This ensures that liquidity is always added proportional to the current reserves' balances.
-If $DR \ne MR$, the excess amount is retunred to the LP.
+If $DR \ne MR$, the excess amount is returned to the LP.
 
-# Trading:
+# Trading
 
-Assume a trader wants to swap $T_0$ for $T_1$. To trade, they sends $amount_0$ of $T_0$.
+Assume a trader wants to swap $T_0$ for $T_1$. To trade, they send $amount_0$ of $T_0$.
 
 In the uniform liquidity model (used in Uniswap V2), liquidity is defined as:
 
 $L^2 = reserve_0 * reserve_1$
 
-This formula is know as *Constant Product Invariant*. When trading, the liquidity remains unchanged:
+This formula is known as *Constant Product Invariant*. When trading, the liquidity remains unchanged:
 
 $reserve_0 * reserve_1 = (reserve_0 + amount_0) * (reserve_1 - amount_1)$
 
 $amount_1$ is the amount of $T_1$ that is going to be removed from the pool. Before sending
 it to the user, some fees are deducted: mainly a platform fee that goes to the owners of the
-DEX and an LP-fee that is going to be accumulated for the liquidity porivders proportional to the 
+DEX and an LP-fee that is going to be accumulated for the liquidity providers proportional to the 
 amount of liquidity they have added to the system.
 
-# Withdrawing Liquidity:
+# Withdrawing Liquidity
 
 Liquidity providers can withdraw their tokens at any time. However, due to trades happening in between, they rarely receive the same token amounts they initially deposited. Instead, they withdraw, depending on the net direction of trades:
 
@@ -61,3 +63,31 @@ Liquidity providers can withdraw their tokens at any time. However, due to trade
 
 Some DEXes provide the LPs with the functionality to withdraw their accrued fee and, if desired, reinvest it to
 the protocol to compound their rewards.
+
+# Pitfalls and Fallacies
+
+In this section, we will highlight common pitfalls and misconceptions that can be confusing for users.
+
+## Pool Price $\ne$ Actual Price
+
+The pool exchange price (which is called *Local Price*) is solely defined by the ratio of assets in the pool. As users can trade their tokens, the ratio of the tokens diverges from the actual price.
+
+## Impermanent Loss
+
+When LPs deposit assets to a pool, the exchange price can change according to the point $MR$. As mentioned above, the local price can be different from the actual price. Hence, if one asset, e.g., $T_0$, is significantly more appreciated than the other one. In this case, liquidity providers end up selling their assets at an undervalued price relative to the broader market. 
+
+## Slippage
+
+Traders don’t swap at a single fixed price, but along the curve defined by the constant product rule. Larger trades move the reserves more, so the average execution price is worse than the quoted start price.
+
+## Front-running
+
+When used as an extension to SNS, each initialization, deposit, or withdraw proposal goes through a public voting process. It means that an attacker can guess the outcome of a voting when in its last stage. As explained before, they can then front-run the execution of the proposal by submitting a trade transaction and move the market ratio away from the ratio expected in the proposal.
+
+## Liquidity Provider Risks
+
+Although LPs are entitled to receive LP-fees, LP fees do not always offset impermanent loss. As a result, LPs may end up with fewer assets in value than if they had simply held their tokens.
+
+## Transaction Fees
+
+Every deposit, withdrawal, or trade involves blockchain transaction fees. These costs reduce the effective amount received.
