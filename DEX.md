@@ -36,7 +36,7 @@ If $DR \ne MR$, the excess amount is retunred to the LP.
 
 # Trading:
 
-When trading, trader sends (without loss of generality we can think of swap $T_0$ for $T_1$) $amount_0$ of $T_0$.
+Assume a trader wants to swap $T_0$ for $T_1$. To trade, they sends $amount_0$ of $T_0$.
 
 In the uniform liquidity model (used in Uniswap V2), liquidity is defined as:
 
