@@ -136,7 +136,7 @@ async fn lifecycle_test() {
 
     // VI: final phase: withdrawal
     {
-        let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id).await;
+        let (balances_0, balances_1) = withdraw(&mut agent, kong_adaptor_canister_id, None).await;
 
         // Expect to have paid 11 fees (3 deposits, each 3 fees, one DEX withdrawal,
         // and one return to treasury account transaction fee).
