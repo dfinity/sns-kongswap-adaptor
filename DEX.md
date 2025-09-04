@@ -49,7 +49,7 @@ This is called the *Constant Product Invariant*. The key idea is that, when trad
 $reserve_0 \times reserve_1 = (reserve_0 + amount_0) \times (reserve_1 - amount_1)$
 
 While this is the most common AMM model, other variants exist (e.g., constant sum for stablecoins, hybrid curves like Curve’s StableSwap).
-The adaptor is, at this stage, implemented exclusively for Kongswap. Since Kongswap (as of 5th September 2025) employs the constant product AMM, our implementation and tests are aligned with that model.
+The adaptor is, at this stage, implemented exclusively for Kongswap. Since Kongswap (as of 5th September 2025) employs the constant product AMM, implementation and tests are aligned with that model.
 
 $amount_1$ is the amount of $T_1$ that is going to be removed from the pool. Before sending
 it to the user, some fees are deducted: a platform fee (paid to the DEX) and an LP fee (accrued to liquidity providers, proportional to their contribution).
