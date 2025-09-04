@@ -62,8 +62,7 @@ LPs can withdraw their tokens at any time. However, due to trades happening in b
 2. Less of the other, and
 3. The fees they have accrued during trading activity.
 
-Some DEXes provide the LPs with the functionality to withdraw their accrued fee and, if desired, reinvest it to
-the protocol to compound their rewards.
+Some DEXes provide the LPs with the functionality to withdraw their accrued fee and, if desired, reinvest it to the protocol to compound their rewards.
 
 # Pitfalls and Fallacies
 
