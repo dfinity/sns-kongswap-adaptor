@@ -27,7 +27,7 @@ $MR = \frac{reserve_0}{reserve_1}$
 
 Equivalently, it is the price of $T_1$ quoted in $T_0$. Intuitively, the higher the relative abundance of $T_0$ compared to $T_1$, the cheaper $T_1$ becomes in terms of $T_0$.
 
-When an LP deposits $amount_0$ and $amount_1$ to the pool (deposit ratio $DR = \frac{amount_0}{amount_1}$), the pool takes the following amounts from $T_0$ and $T_1$ respectively:
+When an LP asks to deposit $amount_0$ and $amount_1$ to the pool (deposit ratio $DR = \frac{amount_0}{amount_1}$), the pool takes the following amounts of the tokens $T_0$ and $T_1$, respectively:
 
 1. if $DR == MR$ => ($amount_0$, $amount_1$)
 2. if $DR >  MR$ => ($amount_1 \times MR$, $amount_1$)
