@@ -89,6 +89,8 @@ When used as an extension to SNS, each initialization, deposit, or withdraw prop
 1. deposits, the treasury funds also ends up in this unhealthy state
 2. withdraws, as described in [Impermanent Loss](#impermanent-loss), it can lose money.
 
+If the DEX implements slippage protection, these risks can be mitigated or avoided.
+
 ## LPs Risks
 
 Although LPs are entitled to receive LP fees, LP fees do not always offset impermanent loss. As a result, LPs may end up with fewer assets in value than if they had simply held their tokens.
