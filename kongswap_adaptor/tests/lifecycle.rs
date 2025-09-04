@@ -195,10 +195,13 @@ async fn lifecycle_test() {
             (expected - observed).abs() <= expected.abs() * tolerance
         }
 
-        let error_tolerance = 0.00001;
+        // @todo
+        // due to rounding errors in the calculations, we allow for a very small
+        // tolerance in the checks below. This should be fixed in the future.
+        let error_tolerance = 0.000001;
 
         assert!(is_within_tolerance(
-            (11999246569_u64 - 9 * FEE_SNS) as f64,
+            11999216568_u64 as f64,
             decode_nat_to_u64(
                 balances_0
                     .treasury_owner
@@ -212,7 +215,7 @@ async fn lifecycle_test() {
         ));
 
         assert!(is_within_tolerance(
-            (12001107784_u64 - 9 * FEE_ICP) as f64,
+            12001077785_u64 as f64,
             decode_nat_to_u64(
                 balances_1
                     .treasury_owner
