@@ -75,7 +75,7 @@ The pool exchange price (which is called *Local Price*) is solely defined by the
 
 ## Impermanent Loss
 
-When LPs deposit assets to a pool, the exchange price can change according to the $MR$. As mentioned in [Pool Price $\ne$ Actual Price](#pool-price-actual-price), the local price can be different from the actual price. Hence, if one asset, e.g., $T_0$, is significantly more appreciated than the other one. In this case, liquidity providers end up selling their assets below the broader market valubelow the broader market value.
+When LPs deposit assets to a pool, the exchange price can change according to the $MR$. As mentioned in [Pool Price $\ne$ Actual Price](#pool-price-actual-price), the local price can be different from the actual price. Hence, if one asset, e.g., $T_0$, is significantly more appreciated than the other one, liquidity providers end up selling their assets below the broader market value.
 
 ## Slippage
 
