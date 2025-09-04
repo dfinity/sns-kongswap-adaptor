@@ -96,4 +96,4 @@ Although LPs are entitled to receive LP fees, LP fees do not always offset imper
 
 ## Transaction Fees
 
-Every deposit, withdrawal, or trade incurs ledger fees. These costs reduce the effective amount received. Fortunately, on the Internet Computer (IC), such fees are significantly lower than on most other blockchains.
+Every deposit, withdrawal, or trade incurs ledger fees. These costs reduce the effective amount received. Fortunately, on ICP such fees are significantly lower than on most other blockchains.
